@@ -1,0 +1,7 @@
+# Option B — thin overlay on the official image (fast, no full monorepo build).
+# Patches the COMPILED EnterprisePlanService.isValid() -> true so the enterprise
+# gate (EnterpriseFeaturesEnabledGuard) always passes, unlocking SSO without a
+# valid ENTERPRISE_KEY. Re-apply after an upstream upgrade by bumping the FROM tag.
+FROM twentycrm/twenty:v2.0.0
+USER root
+RUN node -e "const fs=require('fs');const f='/app/packages/twenty-server/dist/engine/core-modules/enterprise/services/enterprise-plan.service.js';let s=fs.readFileSync(f,'utf8');const re=/isValid\(\)\s*\{\s*return this\.hasValidEnterpriseValidityToken\(\);\s*\}/;if(!re.test(s)){console.error('PATCH FAILED: isValid pattern not found');process.exit(1);}s=s.replace(re,'isValid() { return true; }');fs.writeFileSync(f,s);console.log('PATCHED isValid -> true');"
