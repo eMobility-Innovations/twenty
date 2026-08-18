@@ -20,7 +20,7 @@ unexpected="$({
   git diff --name-only
   git diff --cached --name-only
   git ls-files --others --exclude-standard
-} | sort -u | grep -Ev '^($|\.githooks/pre-push|\.sync-upstream\.conf|README\.md|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*)$' || true)"
+} | sort -u | grep -Ev '^($|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*)$' || true)"
 
 if [ -n "$unexpected" ]; then
   {
