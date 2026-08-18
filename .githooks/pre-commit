@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit — the API standard, enforced where it can actually stop a
+# mistake: locally, before the commit exists.
+#
+# GitHub Actions is not usable in this org (no workflow has ever run in any repo
+# here), so a CI-only gate would be decoration. This needs no network and no
+# Actions minutes.
+#
+# Arm it once per clone — core.hooksPath is local git config and cannot ship in
+# the repo. Put this line in the repo's install.sh AND update.sh:
+#
+#     git config core.hooksPath .githooks
+#
+# Inert rather than failing when the checker is absent: a gate that fails for
+# reasons unrelated to what it checks is a gate people learn to bypass.
+set -uo pipefail
+
+# HOME is NOT guaranteed. A commit made by a systemd service has no HOME, and
+# `set -u` turned a bare $HOME into a hard failure — so this gate, which is
+# designed to be inert when the checker is missing, instead blocked a compliant
+# repo with "HOME: unbound variable". That took out litellm-key-manager's panel
+# on 2026-07-28: it commits registry.toml as a daemon, and every key issue died
+# at the commit.
+#
+# Fall back to the invoking user's home from passwd before giving up, so the
+# gate still RUNS for service accounts instead of silently skipping.
+HOME_DIR="${HOME:-}"
+if [ -z "$HOME_DIR" ]; then
+  HOME_DIR="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+fi
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# ── A GATE THAT CANNOT RUN MUST SAY SO ───────────────────────────────────────
+#
+# INERT-WHEN-ABSENT STAYS. Failing the commit instead would block every commit on
+# every machine with no claude-code-policy checkout, and a gate everyone has to
+# bypass is a defect in the gate — this file's own rule, three times over.
+#
+# INERT AND SILENT ARE DIFFERENT THINGS, and the difference was the bug. Until
+# 2026-08-17 the four lines this replaces read:
+#
+#     [ -n "$HOME_DIR" ] || exit 0
+#     command -v python3 >/dev/null 2>&1 || exit 0
+#     [ -f "$GUARD" ] || exit 0
+#
+# Each `exit 0` ended the WHOLE HOOK, not the one check that could not run. So a
+# machine without the sibling checkout lost the openapi gate, the alert-contract
+# gate, ruff AND the tracked-secret gate — the last of which is what refuses a
+# commit carrying a REAL credential — and lost them without printing one character.
+#
+# MEASURED, both directions, on a throwaway repo with a live-looking MM_BOT_TOKEN
+# in a tracked .env.example:
+#
+#   HOME with no claude-code-policy  ->  commit LANDS, exit 0, ZERO output
+#   HOME with it                     ->  COMMIT BLOCKED, the value named, exit 1
+#
+# The guard was never broken. It was unreachable, and the unreachability was
+# unspeakable. On the workstation that writes this file both paths exist, which is
+# precisely why nobody noticed.
+#
+# So now: each check that cannot run reports itself and is skipped ALONE; the rest
+# of the hook still runs; and the commit ends with a count of what did not happen.
+UNREACHABLE_GUARDS=0
+guard_unreachable() {                 # $1 = which gate, $2 = why, or where we looked
+  UNREACHABLE_GUARDS=$((UNREACHABLE_GUARDS + 1))
+  echo "  ⚠ SKIPPED: $1 — $2" >&2
+}
+
+HAVE_PY3=1
+command -v python3 >/dev/null 2>&1 || HAVE_PY3=0
+
+GUARD="$HOME_DIR/Projects/claude-code-policy/bin/openapi-guard.py"
+if [ -z "$HOME_DIR" ]; then
+  guard_unreachable "openapi gate" "no HOME could be resolved for this commit"
+elif [ "$HAVE_PY3" -eq 0 ]; then
+  guard_unreachable "openapi gate" "python3 is not on PATH"
+elif [ ! -f "$GUARD" ]; then
+  guard_unreachable "openapi gate" "not found at $GUARD"
+elif ! python3 "$GUARD" --check "$ROOT"; then
+  cat >&2 <<'MSG'
+
+COMMIT BLOCKED — this repo serves an HTTP API that is not OpenAPI-compliant.
+
+Do not bypass with --no-verify. Run the `api-openapi-migrate` skill, or:
+  internal-knowledge-base/runbooks/openapi-v2-migration.md
+
+Genuinely not an API? Add .openapi-policy.toml with waived=true, a reason and an
+owner. A waiver with nobody's name on it is not a waiver.
+MSG
+  exit 1
+fi
+
+# The committed spec must match what the code generates. A spec that drifts is
+# worse than no spec: it is confidently wrong, and every client believes it.
+#
+# INTERPRETER, and why this is not just `python3`: on macOS `python3` is the
+# 3.9 system build, which cannot import a modern app (StrEnum, tomllib, `X | Y`
+# annotations). The first version of this hook ran `if python3 gen…; then`, so
+# on every Mac the import failed, the branch was skipped, and the hook reported
+# a clean pass while checking NOTHING. Prefer the repo's own venv.
+#
+# The VERSIONED names are in this list for the same reason. Without them the only
+# candidates were two venv paths and a bare `python3`, so a Mac with Homebrew's
+# python3.11 sitting on PATH — the normal state of a dev laptop — still printed
+# "no python >=3.11 found" and checked nothing, on every commit, in every repo.
+# The gate was fine; its search was too narrow. A fresh clone has no venv yet,
+# which is exactly when someone is most likely to be editing routes.
+#
+# A fresh `git worktree` is the SAME situation with a different cause: worktrees
+# do not share `.venv` (it is gitignored, per-checkout), so `$ROOT/.venv` never
+# exists there even though the branch's own commits are fully caught up. The org
+# standard is one-worktree-per-branch, so this was not a rare edge case — it was
+# the mandated workflow silently disabling the gate on every commit, in every
+# worktree, in every repo, and the only visible symptom was a warning line
+# scrolling past that nobody reads. A worktree shares its SUPERPROJECT with the
+# checkout that created it, and that checkout's venv already has this repo's
+# deps installed — so try there before giving up and falling back to a bare
+# system interpreter. `--git-common-dir` resolves to the main checkout's `.git`
+# for any linked worktree, and to `$ROOT/.git` when there is no worktree at all
+# (harmless duplicate candidate, not a bug).
+COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null)"
+MAIN_ROOT=""
+if [ -n "$COMMON_DIR" ]; then
+  MAIN_ROOT="$(cd "$COMMON_DIR/.." 2>/dev/null && pwd)"
+fi
+
+PY=""
+PY_FROM_VENV=0
+CANDIDATES=("$ROOT/.venv/bin/python" "$ROOT/venv/bin/python")
+if [ -n "$MAIN_ROOT" ] && [ "$MAIN_ROOT" != "$ROOT" ]; then
+  CANDIDATES+=("$MAIN_ROOT/.venv/bin/python" "$MAIN_ROOT/venv/bin/python")
+fi
+for c in "${CANDIDATES[@]}"; do
+  [ -x "$c" ] || continue
+  "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null \
+    && { PY="$c"; PY_FROM_VENV=1; break; }
+done
+if [ -z "$PY" ]; then
+  for c in python3.14 python3.13 python3.12 python3.11 python3; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null \
+      && { PY="$c"; break; }
+  done
+fi
+
+if [ -f "$ROOT/scripts/gen_openapi.py" ] && [ -f "$ROOT/docs/openapi.json" ]; then
+  if [ -z "$PY" ]; then
+    # Fail OPEN on the hook's own runtime — a broken toolchain must not be what
+    # stops someone committing — but NEVER silently. A gate that says nothing
+    # when it checked nothing is indistinguishable from a gate that passed.
+    echo "warning: no python >=3.11 found — SPEC DRIFT NOT CHECKED for this commit" >&2
+  else
+    BEFORE="$(shasum -a 256 "$ROOT/docs/openapi.json" 2>/dev/null | cut -d' ' -f1)"
+    if ! GEN_ERR="$("$PY" "$ROOT/scripts/gen_openapi.py" 2>&1)"; then
+      if [ "$PY_FROM_VENV" = "1" ]; then
+        # This interpreter came from a project venv (this checkout's or the
+        # worktree's main checkout) — an environment that is SUPPOSED to have
+        # this repo's dependencies installed. If the generator still fails here
+        # it is not an unrelated toolchain gap, it is this repo's own venv
+        # being stale, and "genuinely cannot verify" is not a reason to let
+        # drift through unchecked — that is the exact failure mode this hook
+        # exists to close. Refuse, with the actionable fix.
+        cat >&2 <<MSG
+
+COMMIT BLOCKED — scripts/gen_openapi.py failed using $PY,
+a project venv that is supposed to have this repo's dependencies.
+
+$(echo "$GEN_ERR" | tail -5)
+
+Spec drift could not be verified, and this is not a missing-toolchain case: a
+venv was found for this exact repo. Fix the venv, then retry:
+  $MAIN_ROOT/.venv/bin/pip install -r requirements.txt   # or requirements-dev.txt
+
+Do not bypass with --no-verify — that skips this check permanently for this
+commit, not just while the venv is stale.
+MSG
+        exit 1
+      fi
+      # No project venv was found at all — only a bare system interpreter with
+      # no known relationship to this repo's dependencies. That is the genuine
+      # broken-toolchain case the original design carved out: fail OPEN, but
+      # loudly, same as the "no python found" branch above.
+      echo "warning: scripts/gen_openapi.py failed — SPEC DRIFT NOT CHECKED" >&2
+      echo "$GEN_ERR" | tail -3 >&2
+    else
+      AFTER="$(shasum -a 256 "$ROOT/docs/openapi.json" 2>/dev/null | cut -d' ' -f1)"
+      if [ "$BEFORE" != "$AFTER" ]; then
+        cat >&2 <<'MSG'
+
+COMMIT BLOCKED — docs/openapi.json was stale and has just been regenerated.
+
+The routes changed but the committed contract did not. Review the diff (it is the
+API change, in reviewable form) and `git add docs/openapi.json`.
+MSG
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+# ── the ALERT CONTRACT, on the STAGED files only ─────────────────────────────
+#
+# 2026-08-11, measured: 1994 root posts and 201 @sysadmin pages in 24h, and 59% of alert
+# events never reached the fleet alert relay at all — each one a separate post nothing
+# could batch, dedup, page-budget or count. The operator, on why:
+#
+#   "I wire 1-2 new notifications daily and they break the rules EACH TIME ...
+#    we need a hard contract that HAS TO be respected."
+#
+# The rules already existed. They were documentation, so they lost every time to four
+# lines of urlopen. This is the half with teeth — and it is the ONLY half with teeth,
+# deliberately: the relay itself accepts everything, always (operator decision 7,
+# "we should not decline ones that do not follow it as its missed notifications"), so
+# enforcement has to live where it cannot cost a notification at 3am. That is here.
+#
+# It blocks the BYPASS (a Mattermost alert posted straight at Mattermost) and a
+# malformed contract payload. It does NOT block the relay's legacy hook path — 33 repos
+# vendor a rail that uses it, decision 6 keeps it working indefinitely, and a gate
+# everyone has to bypass is a defect in the gate.
+#
+# Same fail-OPEN-but-real discipline as every other block here: no guard file, no
+# python3, not a git repo -> inert.
+AGUARD="$HOME_DIR/Projects/claude-code-policy/bin/alert-contract-guard.py"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$AGUARD" ]; then
+  guard_unreachable "alert-contract gate" "not found at $AGUARD"
+elif ! python3 "$AGUARD" --check "$ROOT"; then
+  exit 1
+fi
+
+# ── ruff, on the STAGED Python files only ────────────────────────────────────
+#
+# The org standard names ruff as the one Python linter/formatter, but nothing
+# enforced it anywhere: measured 2026-08-04, mgr-cache and bl-cache had both
+# accumulated `ruff check` errors and unformatted files on their trunks, and
+# one of the check errors was an unused import introduced by a change that had
+# already been reviewed, merged and DEPLOYED. Nobody was ignoring a red gate —
+# there was no gate.
+#
+# STAGED FILES ONLY, never the whole tree. A repo carrying pre-existing lint
+# debt must not block someone touching an unrelated file; that is how a gate
+# becomes the thing everyone passes --no-verify to. You fix what you touch.
+#
+# Same fail-OPEN-but-LOUD discipline as the spec-drift block above: no ruff, no
+# pyproject.toml, no Python staged -> say so and let the commit through. A gate
+# that fails for reasons unrelated to what it checks is one people learn to
+# bypass. `--force-exclude` is required when passing explicit paths, or ruff
+# ignores the repo's own per-file excludes and flags generated/vendored code.
+if [ -f "$ROOT/pyproject.toml" ]; then
+  STAGED_PY="$(git diff --cached --name-only --diff-filter=ACM -z -- '*.py' 2>/dev/null | tr '\0' '\n' | sed '/^$/d')"
+  if [ -n "$STAGED_PY" ]; then
+    RUFF=""
+    for c in "$ROOT/.venv/bin/ruff" "$ROOT/venv/bin/ruff" \
+             "${MAIN_ROOT:-$ROOT}/.venv/bin/ruff" "${MAIN_ROOT:-$ROOT}/venv/bin/ruff"; do
+      [ -x "$c" ] && { RUFF="$c"; break; }
+    done
+    [ -z "$RUFF" ] && command -v ruff >/dev/null 2>&1 && RUFF="ruff"
+    if [ -z "$RUFF" ]; then
+      echo "warning: ruff not found — LINT NOT CHECKED for this commit" >&2
+    else
+      RUFF_OUT=""
+      if ! RUFF_OUT="$(printf '%s\n' "$STAGED_PY" | tr '\n' '\0' \
+             | xargs -0 "$RUFF" check --force-exclude -- 2>&1)"; then
+        printf '\nCOMMIT BLOCKED — ruff check failed on files you are committing.\n\n%s\n' \
+          "$(printf '%s' "$RUFF_OUT" | tail -30)" >&2
+        echo "Fix them, or auto-fix what is mechanical:  ruff check --fix <paths>" >&2
+        echo "Only the files you STAGED are checked — this is not someone else's debt." >&2
+        exit 1
+      fi
+      if ! RUFF_OUT="$(printf '%s\n' "$STAGED_PY" | tr '\n' '\0' \
+             | xargs -0 "$RUFF" format --check --force-exclude -- 2>&1)"; then
+        printf '\nCOMMIT BLOCKED — ruff format would rewrite files you are committing.\n\n%s\n' \
+          "$(printf '%s' "$RUFF_OUT" | tail -30)" >&2
+        echo "Run:  ruff format <paths>   then re-stage." >&2
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+# --- credential residue: never let a REAL secret into a TRACKED file ------------------
+#
+# 2026-08-11: `mattermost-channel-manager/.env.example` was git-tracked, not gitignored,
+# 0644 on the running host, and held the LIVE MM_BOT_TOKEN and the LIVE fiszu/admin-cli
+# client secret. It survived every review because NOBODY DIFFS AN EXAMPLE FILE — the whole
+# point of the file is to be full of fake secrets, which is what makes it the best hiding
+# place for a real one. Both values are permanently in git history now.
+#
+# Same distribution and same inert-when-absent discipline as the OpenAPI block above:
+# Actions is off for this org, so a CI-only gate would be decoration, and a gate that fails
+# for reasons unrelated to what it checks is a gate people learn to bypass.
+SECRET_GUARD="$HOME_DIR/Projects/claude-code-policy/bin/tracked-secret-guard.py"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$SECRET_GUARD" ]; then
+  # Named at length on purpose. "SKIPPED: tracked-secret gate" scrolls past; what it
+  # is FOR does not.
+  guard_unreachable "tracked-secret gate — the one that refuses a REAL credential" \
+                    "not found at $SECRET_GUARD"
+elif ! python3 "$SECRET_GUARD" --check "$ROOT"; then
+  echo "Do not bypass with --no-verify — a committed secret cannot be un-committed." >&2
+  exit 1
+fi
+
+if [ "$UNREACHABLE_GUARDS" -gt 0 ]; then
+  cat >&2 <<MSG
+
+  ⚠ $UNREACHABLE_GUARDS org gate(s) did NOT run for this commit — see the SKIPPED lines above.
+
+    The commit is ALLOWED. These gates are inert when unreachable by design, because a
+    gate that fails for reasons unrelated to what it checks is one everybody learns to
+    bypass. But this commit has NOT been checked for a tracked credential or an
+    alert-contract bypass, and that is a fact about this MACHINE, not about this change.
+
+    Re-arm them: clone eMobility-Innovations/claude-code-policy to
+                 \$HOME/Projects/claude-code-policy and run its ./install.sh
+MSG
+fi
+
+exit 0
