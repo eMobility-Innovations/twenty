@@ -70,7 +70,31 @@ guard_unreachable() {                 # $1 = which gate, $2 = why, or where we l
 HAVE_PY3=1
 command -v python3 >/dev/null 2>&1 || HAVE_PY3=0
 
-GUARD="$HOME_DIR/Projects/claude-code-policy/bin/openapi-guard.py"
+# WHICH COPY OF THE POLICY CODE DOES THIS GATE RUN?
+#
+# It used to be exactly one path: $HOME/Projects/claude-code-policy -- a DEVELOPER
+# WORKING CHECKOUT, which is mutable by design. Measured on the workstation that
+# maintains this file, 2026-08-19: that checkout was parked on a topic branch 112
+# commits behind trunk with 21 uncommitted files, so bin/org-precommit-gates.sh --
+# which landed on trunk later -- did not exist there at all. Every commit on that
+# machine announced "SKIPPED ... Not found at:" and landed having run NONE of the
+# openapi gate, the alert-contract gate, ruff, or the tracked-secret gate.
+#
+# ~/.claude/policy-runtime is the INSTALLED copy: on main, clean, fast-forwarded by
+# workstation-converge. Every other hook and the statusline on that machine had
+# already been moved onto it; these gates were the straggler.
+#
+# Runtime FIRST, checkout SECOND, per SCRIPT rather than per root -- a root that
+# happens to exist is not the same as one that carries the guard being asked for.
+# When neither has it the checkout path is returned unchanged, so the existing
+# inert-but-loud message keeps naming a path a human recognises.
+_policy_bin() {
+  _pb_rt="${CLAUDE_POLICY_RUNTIME:-$HOME_DIR/.claude/policy-runtime}/bin/$1"
+  _pb_co="$HOME_DIR/Projects/claude-code-policy/bin/$1"
+  if [ -f "$_pb_rt" ]; then printf '%s' "$_pb_rt"; else printf '%s' "$_pb_co"; fi
+}
+
+GUARD="$(_policy_bin openapi-guard.py)"
 if [ -z "$HOME_DIR" ]; then
   guard_unreachable "openapi gate" "no HOME could be resolved for this commit"
 elif [ "$HAVE_PY3" -eq 0 ]; then
@@ -221,10 +245,44 @@ fi
 #
 # Same fail-OPEN-but-real discipline as every other block here: no guard file, no
 # python3, not a git repo -> inert.
-AGUARD="$HOME_DIR/Projects/claude-code-policy/bin/alert-contract-guard.py"
+AGUARD="$(_policy_bin alert-contract-guard.py)"
 if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$AGUARD" ]; then
   guard_unreachable "alert-contract gate" "not found at $AGUARD"
 elif ! python3 "$AGUARD" --check "$ROOT"; then
+  exit 1
+fi
+
+# ── the GATE-OFFLOAD standard: a gate runs its suite on the RUNNER ───────────
+#
+# `CLAUDE.md` has said "GATE SUITES RUN ON THE RUNNER, NOT THE WORKSTATION" for weeks,
+# and `policy/gate-template/pre-push` — the hook that routes verify.sh through
+# claude-gate-run — has existed, tested, since 2026-08-19. MEASURED that evening across
+# the 171 org clones on this workstation:
+#
+#     repos carrying .githooks/pre-push                       15
+#     ... whose pre-push routes through claude-gate-run         1
+#     ... byte-identical to the canonical template              0
+#     verify.sh files mentioning claude-gate-run          0 of 15
+#
+# A template nobody adopts is not a migration, and the same evening the operator asked
+# why their laptop was running tests: load average 101 on 14 cores, two full suites from
+# one session. Every new repo reaches for `pytest` in a verify.sh because it is the
+# obvious thing to type, and nothing noticed. "Anything a check could enforce is a gate,
+# not prose" — this is that gate, and it is what makes the runner the DEFAULT for repos
+# that do not exist yet.
+#
+# It refuses only a WHOLE-SUITE run reached from a gate entry point. A narrow guard run
+# naming its test files stays local on purpose — that is most of what the hooks in this
+# estate actually do, and a valve that tripped on most of its candidates would be a
+# defect report about the predicate, never a reason to raise the cap. Triaged against
+# ground truth on its first live run: 7 of 66 in-scope repos, every one verified by hand.
+#
+# Same fail-OPEN-but-LOUD discipline as every other block here.
+OFFLOAD_GUARD="$(_policy_bin gate-offload-guard.py)"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$OFFLOAD_GUARD" ]; then
+  guard_unreachable "gate-offload gate — the one that keeps suites off your laptop" \
+                    "not found at $OFFLOAD_GUARD"
+elif ! python3 "$OFFLOAD_GUARD" --check "$ROOT"; then
   exit 1
 fi
 
@@ -289,7 +347,7 @@ fi
 # Same distribution and same inert-when-absent discipline as the OpenAPI block above:
 # Actions is off for this org, so a CI-only gate would be decoration, and a gate that fails
 # for reasons unrelated to what it checks is a gate people learn to bypass.
-SECRET_GUARD="$HOME_DIR/Projects/claude-code-policy/bin/tracked-secret-guard.py"
+SECRET_GUARD="$(_policy_bin tracked-secret-guard.py)"
 if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$SECRET_GUARD" ]; then
   # Named at length on purpose. "SKIPPED: tracked-secret gate" scrolls past; what it
   # is FOR does not.
@@ -310,8 +368,14 @@ if [ "$UNREACHABLE_GUARDS" -gt 0 ]; then
     bypass. But this commit has NOT been checked for a tracked credential or an
     alert-contract bypass, and that is a fact about this MACHINE, not about this change.
 
-    Re-arm them: clone eMobility-Innovations/claude-code-policy to
-                 \$HOME/Projects/claude-code-policy and run its ./install.sh
+    Both copies were tried: the INSTALLED runtime (\$HOME/.claude/policy-runtime) first,
+    then the developer checkout (\$HOME/Projects/claude-code-policy). Neither carries them.
+
+    Re-arm them: clone eMobility-Innovations/claude-code-policy and run its ./install.sh,
+                 which is what populates the runtime copy. If the checkout IS already
+                 there, it is PARKED or STALE rather than missing -- the gates that ship
+                 later than its branch simply do not exist in it. Check with:
+                   python3 \$HOME/.claude/policy-runtime/bin/workstation-converge.py --check
 MSG
 fi
 
