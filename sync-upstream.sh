@@ -143,6 +143,41 @@ else
   msg="chore: sync $REF"
 fi
 
+# ---------------------------------------------------------------------------
+# RECORD THE SYNC POINT, IN A TRACKED FILE, IN THIS SAME COMMIT.
+#
+# A fork-scope gate asks how this fork differs from upstream, and the honest way to ask
+# it is `git diff <sync point>...HEAD`. Everywhere a human runs it, `upstream/main`
+# names that point. On the SHARED GATE RUNNER it names nothing: measured on ct211
+# 2026-08-25, the payload carries NO GIT REMOTES AT ALL and the runner holds no
+# credential to add one — deliberately, because that is what keeps the runner a compute
+# surface rather than an access surface. So the check that matters most on the way to
+# origin is precisely the one that cannot run there, and it degrades to a SKIP.
+#
+# The sync point does not need a remote to be named. After a sync it is an ancestor of
+# HEAD, in this repository's own history, reachable by SHA alone. Writing that SHA down
+# is what makes the question answerable inside the payload, on any machine.
+#
+# PROVEN EQUIVALENT, not assumed. On `twenty` 2026-08-25:
+#     git diff --name-only upstream/main...HEAD   ->  44 paths
+#     git diff --name-only <recorded>..HEAD       ->  the same 44 paths, byte for byte
+# because three-dot diff is defined against the merge base, which is exactly what is
+# recorded here.
+SYNC_POINT="$(git rev-parse "$REF^{commit}")"
+{
+  echo "# The upstream commit this fork is synced onto. Written by sync-upstream.sh."
+  echo "#"
+  echo "# TRACKED DELIBERATELY, and it is not documentation. The fork-scope gate reads it"
+  echo "# so that \"how does this fork differ from upstream\" can be answered with no remote"
+  echo "# configured — which is the state of the shared gate runner's payload, by design."
+  echo "# Do not hand-edit: it is rewritten by every sync, and a wrong value here makes the"
+  echo "# gate compare against a commit nobody merged."
+  echo "ref = $REF"
+  echo "commit = $SYNC_POINT"
+  echo "synced = $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > .upstream-sync
+git add .upstream-sync
+
 git commit --quiet --no-edit -m "$msg" || die "merge commit failed."
 
 echo
@@ -151,4 +186,5 @@ if [ -n "$incoming" ]; then
   echo "sync-upstream: dropped $(echo "$incoming" | grep -c .) upstream workflow file(s):"
   echo "$incoming" | sed 's/^/    /'
 fi
+echo "sync-upstream: sync point recorded in .upstream-sync ($(git rev-parse --short "$SYNC_POINT"))."
 echo "sync-upstream: run ./verify.sh before pushing (the pre-push hook will anyway)."
