@@ -116,12 +116,24 @@ fi
 
 if [ -n "${DIFF_RANGE:-}" ]; then
 
+#
+# `REPO-CONTRACT.toml` joined this list on 2026-08-25, by the same argument. It is a
+# gate-policy file by this gate's own definition — the org-standard declaration of what
+# this repo is, what proves it, and what the shared gate runner must provide, read by
+# `repo-contract-guard`. It did not exist when the list was written, so the gate read a
+# compliant gate-policy change as an application change and refused it. The predicate had
+# gone stale against what it claims to guard; the fix is the predicate, not the change.
+#
+# Measured across all 30 gated repos on 2026-08-25, this bites exactly three of them: the
+# 22 others with a checkout carry no path allowlist at all, and the three that do
+# (docuseal-full, chatwoot, twenty) are all vendored upstream forks. All three were widened
+# in the same pass, so this does not come back one repo at a time.
 unexpected="$({
   git diff --name-only "$DIFF_RANGE"
   git diff --name-only
   git diff --cached --name-only
   git ls-files --others --exclude-standard
-} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*)$' || true)"
+} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*)$' || true)"
 
 if [ -n "$unexpected" ]; then
   {
