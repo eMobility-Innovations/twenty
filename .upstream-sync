@@ -1,0 +1,16 @@
+# The upstream commit this fork is synced onto. Written by sync-upstream.sh.
+#
+# TRACKED DELIBERATELY, and it is not documentation. The fork-scope gate reads it
+# so that "how does this fork differ from upstream" can be answered with no remote
+# configured — which is the state of the shared gate runner's payload, by design.
+# Do not hand-edit: it is rewritten by every sync, and a wrong value here makes the
+# gate compare against a commit nobody merged.
+#
+# SEEDED BY HAND, ONCE, 2026-08-25. This fork has never run sync-upstream.sh — its
+# history descends from twentyhq/twenty directly — so there was no sync merge to
+# read a point from. The value is `git merge-base upstream/main HEAD`, which is
+# exactly what a three-dot diff against upstream/main already resolves to, so the
+# gate's answer is unchanged. The next sync overwrites this line.
+ref = upstream/main
+commit = 8d24551e7137ac3f58018884fcf867d49bcf1fa4
+synced = 2026-08-25T11:35:00Z
