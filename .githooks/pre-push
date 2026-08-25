@@ -20,6 +20,30 @@
 
 set -uo pipefail
 
+# ---------------------------------------------------------------------------
+# 🔴 DRAIN STDIN FIRST — BEFORE ANY CHILD CAN STEAL IT.
+#
+# Git hands a pre-push hook the ref list on STDIN, one
+# "<local ref> <local sha> <remote ref> <remote sha>" line per ref, and keeps
+# that pipe open until the hook consumes it. This hook does not need the list,
+# but it MUST take it, because it spawns ssh — and ssh reads stdin. The gate
+# runner's ssh swallowed git's ref pipe and closed it on exit; git's next write
+# to it took SIGPIPE and the push died with rc=141 AFTER this hook had already
+# printed "gates passed — pushing".
+#
+# The result is the worst shape a gate can have: `git push` exits non-zero with
+# no error text, having transported nothing, while every message the operator
+# can see says the gates passed. Measured 2026-08-19 on claude-code-config —
+# four consecutive "successful" pushes of a merged, gate-green branch that
+# never left the machine, and were only caught by `git ls-remote`.
+#
+# Reading it here closes git's write side immediately, so nothing downstream can
+# be handed a pipe it will close under git's feet. Children get </dev/null too,
+# further down, so this cannot regress by a new caller forgetting.
+# ---------------------------------------------------------------------------
+PUSH_REFS="$(cat)"
+export PUSH_REFS
+
 REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
 cd "$REPO_ROOT" || exit 1
 
@@ -50,6 +74,233 @@ unset GIT_DIR GIT_COMMON_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX \
       GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
 # ---------------------------------------------------------------------------
+# TAKE THE MERGE GATE'S VERDICT HERE, WHERE A WAIT IS AFFORDABLE.
+#
+# The merge gate builds the tree the trunk is about to have and runs the repo's
+# own gate against it. For a whole-suite repo that is minutes. It runs inside a
+# `PreToolUse` hook the harness kills at 10s, DISCARDING the hook's entire
+# output, so the merge proceeds UNCHECKED. Measured on the decision trail: 30
+# validations killed before any verdict across 24 checkouts in the 21 hours to
+# 2026-08-20T13:12Z, and no validation anywhere has ever settled above 8s
+# against that 10s budget. Linter gates squeak through; suite gates never
+# finish. There is no middle.
+#
+# Raising the hook timeout was considered and REJECTED with a reason: its
+# matcher is Edit|Write|MultiEdit|NotebookEdit|Bash|Read|Grep|Agent, so a budget
+# big enough for a long suite is a budget any misbehaving module can spend on
+# any Read, in any of ~24 concurrent sessions.
+#
+# So the verdict is taken HERE and the merge only looks it up — measured at
+# about a second against the run it replaces.
+#
+# THIS RUNS BEFORE THE GATE BELOW, ON PURPOSE. The primer detaches, so the
+# priming suite overlaps this hook's own verify.sh run instead of queueing
+# behind it. It is also why it must not sit inside the SKIP_VERIFY branch: a
+# bypassed push still produces a merge that wants a verdict.
+#
+# IT NEVER BLOCKS A PUSH, not even for a red verdict. Pushing a branch that is
+# not ready is legitimate and routine; MERGING one that is not is what this
+# exists to stop. A gate that also blocks pushes gets routed around with
+# --no-verify, which no hook can see.
+#
+# ALL THE LOGIC IS IN THE PRIMER, NOT HERE. Which refs are worth priming and how
+# the run is detached are decided once, in prime-merge-validation.py, with
+# tests. A subshell keeps its `exit 0` local and its unsets from leaking.
+#
+#   CLAUDE_PRIME_ON_PUSH=0   turn the rail off for one push
+#   CLAUDE_PRIME_SYNC=1      wait for the verdict instead of backgrounding it
+# ---------------------------------------------------------------------------
+(
+  # SELF-CONTAINED ON PURPOSE. This block is pasted into hooks that drain PUSH_REFS
+  # and scrub git's location variables at DIFFERENT points, and one that reads a
+  # $REPO_ROOT its host hook has not defined yet is a block that works in the repo
+  # it was written in and silently primes the wrong tree elsewhere. It therefore
+  # depends on exactly one thing from its host: PUSH_REFS, exported above.
+  #
+  # 🔴 THE PRIMER MUST NOT INHERIT THIS PUSH'S GIT LOCATION. Git exports GIT_DIR and
+  # friends into every hook, and they override `cwd` AND `git -C`. The primer builds
+  # a throwaway worktree and runs a suite inside it; with these set, every git
+  # command in that child is silently redirected at THIS checkout — which means
+  # validating the wrong tree and calling a merge safe. Scrubbed inside the subshell
+  # so the host hook's own scrub, wherever it happens, cannot be the thing that
+  # makes this correct.
+  unset GIT_DIR GIT_COMMON_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX \
+        GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+  _pp_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+  [ -n "$_pp_root" ] || exit 0
+  _pp_primer="${CLAUDE_POLICY_PRIMER:-$HOME/.claude/policy-runtime/bin/prime-merge-validation.py}"
+  # INERT WHERE THE RAIL IS NOT INSTALLED: a clone on a machine with no policy
+  # runtime pushes exactly as it did before this block existed.
+  [ -f "$_pp_primer" ] || exit 0
+  [ "${CLAUDE_PRIME_ON_PUSH:-1}" = "1" ] || exit 0
+  command -v python3 >/dev/null 2>&1 || exit 0
+  _pp_sync=""
+  [ "${CLAUDE_PRIME_SYNC:-0}" = "1" ] && _pp_sync="--sync"
+  # `|| true`: the primer reports a VERDICT, and a red verdict is not a reason
+  # to refuse a push. See the header.
+  printf '%s\n' "$PUSH_REFS" \
+    | python3 "$_pp_primer" --from-push-refs --repo "$_pp_root" $_pp_sync || true
+) || true
+
+# ---------------------------------------------------------------------------
+# 🔴 THE PUSH THAT SAID "gates passed" AND TRANSPORTED NOTHING.
+#
+# Everything above this line makes the gate correct. None of it can make the
+# PUSH correct, because the failure happens AFTER this hook exits 0:
+#
+#   git opens its transport to the remote BEFORE running pre-push, then runs
+#   the hook, then writes the pack. A gate that takes minutes leaves that
+#   connection IDLE for minutes. The remote closes it — GitHub says
+#   "Connection to github.com closed by remote host" — and git's next write
+#   takes SIGPIPE. `git push` exits 141: no error text, nothing transported,
+#   and the last thing on screen is this hook's own "gates passed — pushing".
+#
+# Measured SEVEN times on claude-code-config, 2026-08-19 and 2026-08-20, gate
+# ~378 s, against a Host block with no keepalive. Three full gate cycles were
+# spent before anyone believed it, because there is nothing to believe: the
+# branch is simply absent from the remote and only `git ls-remote` says so.
+# See internal-knowledge-base/todo/2026-08-20_ssh-pushes-die-rc141-because-the-
+# gate-outlasts-githubs-idle-timeout.md.
+#
+# A pre-push hook CANNOT observe this — it is already gone when it happens. So
+# this does the only two things a hook can do, and neither of them picks a
+# number, because the remedy (a keepalive interval, or moving the gate off the
+# push) is the operator's call and not this file's:
+#
+#   PREDICT — before spending the gate, say out loud that this push is in the
+#             known-fatal shape: an SSH transport whose effective
+#             ServerAliveInterval is 0.
+#   DETECT  — write down what this push is ABOUT to place on the remote, and
+#             on the next run check whether it ever got there. An unlanded
+#             push then announces itself instead of being discovered days
+#             later by a `git ls-remote` somebody thought to run.
+#
+# Report-once by construction: the ledger is rewritten after every check, so a
+# row is either resolved or reported exactly one time. There is no timer, no
+# expiry and no threshold here on purpose.
+# ---------------------------------------------------------------------------
+PUSH_LEDGER="${CLAUDE_PUSH_LEDGER:-$HOME/.claude/cache/push-intent.tsv}"
+# git passes pre-push `<remote-name> <remote-url>`. Tests and manual runs pass
+# neither, so fall back rather than tripping `set -u` or guessing a remote.
+PUSH_REMOTE_URL="${2:-}"
+[ -n "$PUSH_REMOTE_URL" ] || PUSH_REMOTE_URL="$(git remote get-url "${1:-origin}" 2>/dev/null || true)"
+
+# The SSH alias behind a remote URL, or nothing at all for https:// — which is
+# stateless per request and structurally cannot have this failure. Both git
+# spellings: `ssh://[user@]host[:port]/path` and `[user@]host:path`.
+_pp_ssh_host() {
+  case "$1" in
+    ssh://*) printf '%s' "${1#ssh://}" | sed -e 's#/.*##' -e 's#.*@##' -e 's#:.*##' ;;
+    *://*)   : ;;
+    *:*)     printf '%s' "${1%%:*}" | sed -e 's#.*@##' ;;
+    *)       : ;;
+  esac
+}
+
+# `ssh -G` reports the EFFECTIVE value after every Host block, Match and default
+# has been applied — which is the only thing that decides whether the connection
+# survives the gate. Reading ~/.ssh/config by hand gets this wrong the moment a
+# wildcard block sets it.
+_pp_warn_idle_transport() {
+  _h="$(_pp_ssh_host "$PUSH_REMOTE_URL")"
+  [ -n "${_h:-}" ] || return 0
+  # PROBE WITH THE SSH GIT ITSELF WILL USE, not with a bare `ssh`.
+  # GIT_SSH_COMMAND / core.sshCommand can carry `-F <file>`, `-o` overrides or a
+  # different binary entirely, and it is THAT connection whose idle behaviour
+  # decides whether this push survives. Probing a bare `ssh` would report the
+  # settings of a session git never opens.
+  #
+  # And `ssh -G` is the only honest way to read the value: it applies every Host
+  # block, Match and built-in default. Note it resolves ~/.ssh/config from the
+  # PASSWD entry, not from $HOME — OpenSSH 10.2 ignores $HOME here — so grepping
+  # a config file by hand gets a different answer than the transport does.
+  _sshc="${GIT_SSH_COMMAND:-}"
+  [ -n "$_sshc" ] || _sshc="$(git config --get core.sshCommand 2>/dev/null || true)"
+  [ -n "$_sshc" ] || _sshc="ssh"
+  command -v "${_sshc%% *}" >/dev/null 2>&1 || return 0
+  # shellcheck disable=SC2086  # deliberate: $_sshc is a COMMAND LINE, not a word.
+  _iv="$($_sshc -G "$_h" 2>/dev/null </dev/null | awk '$1=="serveraliveinterval"{print $2; exit}')"
+  [ "${_iv:-0}" = "0" ] || return 0
+  printf '\n'
+  printf '!!  pre-push: this push holds an IDLE SSH connection for the whole gate.\n'
+  printf '!!  git opened its transport to "%s" BEFORE running this hook and will not\n' "$_h"
+  printf '!!  touch it again until the gate finishes. `ssh -G %s` reports\n' "$_h"
+  printf '!!  ServerAliveInterval=0, so nothing keeps that session alive.\n'
+  printf '!!  If the remote closes it first, git exits 141 (SIGPIPE) with NO message,\n'
+  printf '!!  having transported nothing, immediately after this hook says it passed.\n'
+  printf '!!  Measured 7x on 2026-08-19/20. The ledger check below catches it next run.\n'
+  printf '!!  The remedy is a keepalive on that Host block; the number is the operator'"'"'s.\n'
+  printf '\n'
+}
+
+# Did the last push from THIS checkout actually reach the remote?
+#
+# Rows for other repositories are carried through untouched, never judged: this
+# working tree does not hold their objects, so an ancestry test here would call
+# somebody else's landed push a lost one.
+_pp_check_ledger() {
+  [ -s "$PUSH_LEDGER" ] || return 0
+  _keep="$(mktemp 2>/dev/null)" || return 0
+  _lost=0
+  while IFS="$(printf '\t')" read -r _when _repo _url _ref _sha; do
+    [ -n "${_sha:-}" ] || continue
+    if [ "$_repo" != "$REPO_ROOT" ]; then
+      printf '%s\t%s\t%s\t%s\t%s\n' "$_when" "$_repo" "$_url" "$_ref" "$_sha" >>"$_keep"
+      continue
+    fi
+    _rsha="$(git ls-remote "$_url" "$_ref" 2>/dev/null </dev/null | awk 'NR==1{print $1}')"
+    [ "$_rsha" = "$_sha" ] && continue
+    # Landed, then superseded by somebody else's push is INDISTINGUISHABLE from
+    # never landed on the sha alone — and on a hot trunk that is the common case,
+    # so it is resolved rather than guessed at. The fetch is what makes the other
+    # side's commit available to judge ancestry against.
+    if [ -n "${_rsha:-}" ]; then
+      git fetch -q "$_url" "$_ref" >/dev/null 2>&1 </dev/null || true
+      git merge-base --is-ancestor "$_sha" FETCH_HEAD >/dev/null 2>&1 </dev/null && continue
+    fi
+    _lost=1
+    printf '\n' >&2
+    printf '🔴 pre-push: A PREVIOUS PUSH REPORTED "gates passed" AND NEVER LANDED.\n' >&2
+    printf '\n' >&2
+    printf '    when   %s\n' "$_when" >&2
+    printf '    ref    %s\n' "$_ref" >&2
+    printf '    commit %s\n' "$_sha" >&2
+    printf '    remote %s\n' "$_url" >&2
+    printf '    remote currently holds: %s\n' "${_rsha:-<the ref does not exist there>}" >&2
+    printf '\n' >&2
+    printf '    That commit is not on the remote and is not an ancestor of what is.\n' >&2
+    printf '    This is the rc=141 class: the gate outlasted the transport idle timeout,\n' >&2
+    printf '    git took SIGPIPE writing the pack, and the push exited non-zero with no\n' >&2
+    printf '    message at all. Nothing was lost locally — push it again.\n' >&2
+    printf '    Root cause and the three remedies: internal-knowledge-base/todo/\n' >&2
+    printf '    2026-08-20_ssh-pushes-die-rc141-because-the-gate-outlasts-githubs-idle-timeout.md\n' >&2
+    printf '\n' >&2
+  done < "$PUSH_LEDGER"
+  mv -f "$_keep" "$PUSH_LEDGER" 2>/dev/null || rm -f "$_keep"
+  return $_lost
+}
+
+# Written on every path that lets the push proceed — including the bypass, which
+# transports exactly the same pack over exactly the same connection.
+_pp_record_intent() {
+  [ -n "${PUSH_REFS:-}" ] || return 0
+  [ -n "${PUSH_REMOTE_URL:-}" ] || return 0
+  mkdir -p "$(dirname "$PUSH_LEDGER")" 2>/dev/null || return 0
+  _now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '%s\n' "$PUSH_REFS" | while read -r _lref _lsha _rref _rsha; do
+    [ -n "${_rref:-}" ] || continue
+    # An all-zero local sha is a DELETION: there is nothing to land, and judging
+    # it later would report every `git push --delete` as a lost push.
+    case "${_lsha:-}" in *[!0]*) ;; *) continue ;; esac
+    printf '%s\t%s\t%s\t%s\t%s\n' "$_now" "$REPO_ROOT" "$PUSH_REMOTE_URL" "$_rref" "$_lsha" \
+      >>"$PUSH_LEDGER"
+  done
+}
+
+_pp_check_ledger || true
+_pp_warn_idle_transport
+
+# ---------------------------------------------------------------------------
 # THE ESCAPE HATCH IS LOUD *AND* LEAVES A TRACE.
 #
 # Removing the hatch entirely wedges people, and a wedged gate gets routed around — with
@@ -71,14 +322,36 @@ if [ "${SKIP_VERIFY:-}" = "1" ] || [ "${PANGOLIN_SKIP_VERIFY:-}" = "1" ]; then
   # The value is free text and the log is TAB-delimited, so tabs and newlines are
   # scrubbed before it is written — a reason must never be able to forge a column —
   # and it is capped so one paste cannot bloat the log.
-  _reason=$(printf '%s' "${SKIP_VERIFY_REASON:-}" | tr '\t\r\n' '   ' | cut -c1-200)
+  # BOTH spellings of the reason are honoured, because BOTH spellings of the trigger
+  # are (the `if` above). `pangolin-tunnel` shipped `PANGOLIN_SKIP_VERIFY` with its own
+  # `PANGOLIN_SKIP_VERIFY_REASON` before the template absorbed the trigger; absorbing the
+  # trigger without the reason turns that repo's DOCUMENTED override into a hard refusal
+  # the moment this template reaches it. Additive: no existing invocation changes meaning.
+  # THE REFUSAL MUST NAME THE VARIABLE THE READER ACTUALLY HAS. Accepting both spellings
+  # of the trigger while only ever NAMING `SKIP_VERIFY_REASON` tells a pangolin-tunnel
+  # operator to set a variable they were never taught, for a trigger they did set. That
+  # repo pins this in its own suite (`tests/hook-gate-check.sh`: "the refusal names the
+  # variable to set"), and that test went red the moment this template reached it — which
+  # is the test doing exactly its job.
+  #
+  # `PANGOLIN_SKIP_VERIFY_REASON` CONTAINS the substring `SKIP_VERIFY_REASON`, so naming
+  # the specific one satisfies both repos' assertions without weakening either.
+  if [ "${PANGOLIN_SKIP_VERIFY:-}" = "1" ] && [ "${SKIP_VERIFY:-}" != "1" ]; then
+    _skip_var="PANGOLIN_SKIP_VERIFY"
+  else
+    _skip_var="SKIP_VERIFY"
+  fi
+  _reason=$(printf '%s' "${SKIP_VERIFY_REASON:-${PANGOLIN_SKIP_VERIFY_REASON:-}}" \
+              | tr '\t\r\n' '   ' | cut -c1-200)
   if [ -z "$(printf '%s' "$_reason" | tr -d '[:space:]')" ]; then
     printf '\n' >&2
-    printf 'pre-push: SKIP_VERIFY is set, but SKIP_VERIFY_REASON is empty — REFUSING.\n' >&2
+    printf 'pre-push: %s is set, but %s_REASON is empty — REFUSING.\n' \
+           "$_skip_var" "$_skip_var" >&2
     printf 'pre-push: the gate may be overridden; it may not be overridden silently.\n' >&2
     printf 'pre-push: state the reason in one line, and push again:\n' >&2
     printf '\n' >&2
-    printf '    SKIP_VERIFY=1 SKIP_VERIFY_REASON="why this override is right" git push\n' >&2
+    printf '    %s=1 %s_REASON="why this override is right" git push\n' \
+           "$_skip_var" "$_skip_var" >&2
     printf '\n' >&2
     exit 1
   fi
@@ -108,7 +381,72 @@ if [ "${SKIP_VERIFY:-}" = "1" ] || [ "${PANGOLIN_SKIP_VERIFY:-}" = "1" ]; then
   printf '!!  CI cannot check it either (org Actions billing). You are the only gate there was.\n'
   printf '!!  Logged to %s — the next session start will say so.\n' "$_log"
   printf '\n'
+  _pp_record_intent
   exit 0
+fi
+
+# ── NOTHING EMPTY REACHES THE REMOTE ────────────────────────────────────────
+#
+# Measured 2026-08-20, twice in one day: a commit that recorded NO FILES passed
+# every rail. github-access-manager PR #57 squash-merged to trunk as `cf84e7f`
+# with zero files while the pre-commit gate ran 679 tests green, `git log`
+# printed the subject, the push succeeded and the deploy put it on the CT. It
+# was caught only by grepping the DEPLOYED file. `claude-gate-run` records the
+# same shape hours earlier on whatsapp-supplier-manager: four consecutive
+# commits, both rails green, no files at all.
+#
+# THIS RUNS BEFORE verify.sh, DELIBERATELY. The suite is the expensive part and
+# it cannot answer this question — it tests the working tree, which still holds
+# the change, so it goes green precisely when this fails. Judging the commits
+# first also means the refusal arrives in a second rather than after a full
+# remote suite.
+#
+# The producer is not known. Until it is, this is the only thing between an
+# empty commit and trunk, and it costs one `diff-tree` per pushed commit.
+_ECG="$(command -v empty-commit-guard 2>/dev/null || true)"
+[ -n "$_ECG" ] || _ECG="$HOME/Projects/claude-code-policy/bin/empty-commit-guard.py"
+if [ -x "$_ECG" ]; then
+  # PUSH_REFS is already drained above; the guard reads it from the environment
+  # so nothing here can steal git's pipe a second time.
+  if ! "$_ECG" --push </dev/null; then
+    exit 1
+  fi
+fi
+# An ABSENT guard is not a failure — same reasoning as every other check in this
+# hook. A machine with no policy checkout must not be unable to push.
+
+# CLIENT CODE REACHES THE ESTATE OVER PUBLIC DNS. Only for repos named in
+# claude-code-policy's policy/client-surface.json — today the two that install
+# onto a workstation. Every other repo exits 0 immediately and prints nothing,
+# which is what makes this safe to carry in the SHARED gate: measured
+# 2026-08-24, the same scan over the 23 gated repos cloned on a workstation
+# returns 18,394 occurrences, almost all documentation and test fixtures, and a
+# detector that fires on those is one everybody learns to bypass.
+_CPD="$(command -v client-public-dns-guard 2>/dev/null || true)"
+[ -n "$_CPD" ] || _CPD="$HOME/Projects/claude-code-policy/bin/client-public-dns-guard.py"
+if [ -x "$_CPD" ]; then
+  # The repo name as the policy spells it, not the directory name: a worktree is
+  # called `ccp-surface` and would otherwise silently stop being checked.
+  _CPD_NAME="$(basename "$(git config --get remote.origin.url 2>/dev/null || echo "$PWD")" .git)"
+  if ! "$_CPD" --repo "$(git rev-parse --show-toplevel)" --repo-name "$_CPD_NAME" </dev/null; then
+    exit 1
+  fi
+fi
+
+# THE REPO CONTRACT. Four things every repo must have -- a filled-in REPO-CONTRACT.toml,
+# a real test suite, this gate, and that gate offloaded to the runner -- and any one
+# missing is a failure. It is SAFE to carry in the shared hook before the estate complies
+# because the guard is roster-gated: a repo enrolled before policy/repo-contract.json's
+# `enforce_new_from` prints its findings and exits 0, so this block cannot become the flag
+# day that refuses every push in the org on one afternoon. A repo enrolled on or after
+# that date is enforced from the day it is enrolled, which is the point: a NEW repo cannot
+# be created without all four.
+_RCG="$(command -v repo-contract-guard 2>/dev/null || true)"
+[ -n "$_RCG" ] || _RCG="$HOME/Projects/claude-code-policy/bin/repo-contract-guard.py"
+if [ -x "$_RCG" ]; then
+  if ! "$_RCG" --check "$(git rev-parse --show-toplevel)" </dev/null; then
+    exit 1
+  fi
 fi
 
 if [ ! -x ./verify.sh ]; then
@@ -117,11 +455,106 @@ if [ ! -x ./verify.sh ]; then
   exit 1
 fi
 
+# ── SEND THE SUITE TO THE RUNNER WHEN THERE IS ONE ───────────────────────────
+#
+# Measured 2026-08-18: 139 hook files across 35 repos each run an independent full
+# suite, so concurrent sessions multiply directly. The workstation reached load
+# 111/147/184 on 14 cores and a full proxmox-fleet-manager suite had not finished
+# 30 minutes after starting. Capping concurrency only makes a commit WAIT — the
+# work never leaves the box.
+#
+# `claude-gate-run` sends the git-tracked payload to the runner CT and returns the
+# suite's own exit code. Untracked files are never transmitted, so a .env or a
+# token-bearing fixture is structurally incapable of leaving this machine.
+#
+# THIS IS INERT UNTIL SOMEBODY TURNS IT ON. With no
+# ~/.config/claude-policy/gate-runner.json naming a runner with `enabled: true`
+# — the state of every machine until one is written, and nothing writes one
+# automatically — the wrapper execs the original argv and behaviour is
+# byte-identical to the line it replaced. That is deliberate: it lets every repo
+# adopt before anyone decides which machines offload, so no repo waits on a
+# rollout. `CLAUDE_GATE_CONFIG` overrides the path; `CLAUDE_GATE_REMOTE=0`
+# disables remote for a single run without editing the file.
+#
+# ABSENT is also fine. `command -v` failing means this machine has no policy
+# checkout, and the suite runs exactly as it always did — same reasoning as every
+# other guard in this gate: one that fails for reasons unrelated to what it
+# checks is one people learn to bypass.
+GATE_RUN="$(command -v claude-gate-run 2>/dev/null || true)"
+if [ -n "$GATE_RUN" ]; then
+  set -- "$GATE_RUN" -- ./verify.sh
+else
+  set -- ./verify.sh
+fi
+
 printf '\npre-push: running ./verify.sh (GitHub Actions cannot run for this org)\n'
 
-if ./verify.sh; then
+"$@"
+GATE_RC=$?
+
+# ── THE WRAPPER COULD NOT BE EXECUTED AT ALL ─────────────────────────────────
+#
+# 126 and 127 are the SHELL's own codes, not the wrapper's: "found but not
+# executable" and "not found". A symlink whose target went away on an interrupted
+# install, a bad shebang, a partially-synced checkout — all land here, and all
+# mean the suite never started. That is unambiguous, so this layer can act on it,
+# and it must: this line is the only new way a push can fail that adopting the
+# wrapper introduced, and a repo must never be worse off for having adopted.
+#
+# EVERY OTHER NON-ZERO CODE IS PASSED THROUGH UNTOUCHED, and that is a decision
+# rather than an omission. A wrapper exiting 1 because the rail is down and a
+# suite exiting 1 because a test failed are the SAME NUMBER, and nothing at this
+# layer can tell them apart. Guessing would eventually turn a real red into a
+# green, which is the one outcome worse than a refused push.
+#
+# So the "did the suite actually run" question belongs to the client, which
+# answers it BEHAVIOURALLY — the runner echoes its exit code in a marker on the
+# stream, and no marker means the suite never ran whatever the transport
+# returned. That was found the hard way on 2026-08-18: `pssh` wraps
+# `pangolin ssh`, whose dead auth daemon exits 1, so a client trusting ssh's
+# "255 means could not connect" convention read a dead rail as a failing suite
+# and refused three pushes that should have fallen back.
+if [ -n "$GATE_RUN" ] && { [ "$GATE_RC" -eq 126 ] || [ "$GATE_RC" -eq 127 ]; }; then
+  printf '\npre-push: %s could not be executed (exit %s) — running the suite locally.\n' \
+    "$GATE_RUN" "$GATE_RC" >&2
+  ./verify.sh
+  GATE_RC=$?
+fi
+
+if [ "$GATE_RC" -eq 0 ]; then
+  _pp_record_intent
   printf '\npre-push: gates passed — pushing.\n'
   exit 0
+fi
+
+# ── THE GATE COULD NOT RUN, WHICH IS NOT THE GATE SAYING NO ──────────────────
+#
+# 3 means the client was ENDED before the suite reached a verdict — killed by a
+# signal, most often a caller's timeout firing on a slow upload or on a wait
+# behind another session already holding the shared runner. Measured twice within
+# one hour on 2026-08-20 (#834), where the commit path's equivalent branch told
+# the committer their package "fails its own validation" about a suite that had
+# been shot. The remedy for a red gate is to change the code; the remedy for this
+# is to run it again, and telling someone to debug costs them the hour.
+#
+# THIS IS NOT THE GUESS THE COMMENT ABOVE REFUSES. That refusal is about
+# INFERRING intent from a number two different things can produce — and it still
+# stands: 1 is still passed through untouched, and 128+N is deliberately NOT read
+# here, because `./verify.sh` is a repo's own suite and may exit any code it likes
+# on its own account. 3 is different in kind: `claude-gate-run` reserves it and
+# emits it from its own SIGTERM handler, so this branch rests on a STATEMENT the
+# client made about itself rather than on an inference about what a number meant.
+#
+# AND IT STILL REFUSES THE PUSH. Both branches exit 1. Nothing here can turn a
+# red into a green — a gate that could not RUN is not permission to skip it. The
+# only thing that changes is which sentence the person reads.
+if [ -n "$GATE_RUN" ] && [ "$GATE_RC" -eq 3 ]; then
+  printf '\n'
+  printf 'pre-push: THE GATE COULD NOT RUN — push refused. It did not fail.\n' >&2
+  printf 'pre-push: the suite was ended before it reached a verdict, so NOTHING\n' >&2
+  printf '    was validated and there is no finding above to act on. Push again.\n' >&2
+  printf '    If it repeats, the rail is the thing to look at, not your code.\n' >&2
+  exit 1
 fi
 
 printf '\n'
@@ -129,3 +562,4 @@ printf 'pre-push: GATES FAILED — push refused.\n' >&2
 printf 'pre-push: fix the code. To override deliberately, saying why:\n' >&2
 printf '    SKIP_VERIFY=1 SKIP_VERIFY_REASON="why" git push\n' >&2
 exit 1
+# gate-template-revision: 60588572
