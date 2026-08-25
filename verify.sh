@@ -14,10 +14,11 @@ echo "gate: org-specific application changes must have targeted checks"
 # WHEN THIS CHECK CANNOT BE ANSWERED AT ALL, IT SKIPS BY NAME — IT DOES NOT PASS.
 #
 # This gate asks how the fork differs from `upstream/main`. The shared gate runner
-# cannot answer it: the payload it receives is a clone carrying ONE remote, and the
-# runner holds no credential to fetch another. That is deliberate — it is what keeps
-# the runner a compute surface rather than an access surface — so `upstream` is not
-# merely unfetched there, it does not exist.
+# cannot answer it. MEASURED on ct211 2026-08-25, from this check's own output: the
+# payload it receives carries NO GIT REMOTES AT ALL — `git remote` prints nothing —
+# and the runner holds no credential with which to add one. That is deliberate; it is
+# what keeps the runner a compute surface rather than an access surface. So `upstream`
+# is not merely unfetched there, it cannot exist.
 #
 # Operator's ruling, 2026-08-25: "we pull from upstream and apply our overlay, so at
 # the end only OUR fork has to run." So the runner being unable to answer this is not
@@ -52,8 +53,8 @@ if ! git rev-parse --verify -q upstream/main >/dev/null; then
   echo "fork-scope: SKIPPED — no 'upstream' remote exists in this checkout, so the" >&2
   echo "fork-scope:   fork's change scope cannot be measured by anyone from here." >&2
   echo "fork-scope:   remotes present: $(git remote | tr '\n' ' ' | sed 's/ $//')" >&2
-  echo "fork-scope:   This is the shared gate runner's payload, which carries one" >&2
-  echo "fork-scope:   remote and no credential to fetch another, by design." >&2
+  echo "fork-scope:   On the shared gate runner that list is EMPTY: the payload has" >&2
+  echo "fork-scope:   no remotes and no credential to add one, by design." >&2
   echo "fork-scope:   THIS RUN DID NOT PROVE FORK SCOPE. Run ./verify.sh on a clone" >&2
   echo "fork-scope:   that has 'upstream' to prove it." >&2
 else
