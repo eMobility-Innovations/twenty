@@ -101,8 +101,35 @@ elif [ "$HAVE_PY3" -eq 0 ]; then
   guard_unreachable "openapi gate" "python3 is not on PATH"
 elif [ ! -f "$GUARD" ]; then
   guard_unreachable "openapi gate" "not found at $GUARD"
-elif ! python3 "$GUARD" --check "$ROOT"; then
-  cat >&2 <<'MSG'
+else
+  # A LEG'S ERROR IS NOT ITS VERDICT, AND THE MESSAGE IS WHERE THE TWO GET CONFUSED.
+  #
+  # `openapi-guard.py` already distinguishes them: it reserves exit 2 for "I crashed"
+  # (its own `except Exception` writes `openapi-guard: <exc>` and exits 2 under --check),
+  # and it fails closed on purpose, because an evaluator that crashed has proven nothing.
+  # This shell threw that distinction away — every non-zero code arrived at ONE message,
+  # which tells the committer their repo is not OpenAPI-compliant and sends them to run a
+  # migration skill. For a crash that verdict is invented, the advice is wrong, and a repo
+  # that is already compliant gets migrated on the strength of it.
+  #
+  # Both still BLOCK. What changes is whether the reader debugs their API or this gate.
+  python3 "$GUARD" --check "$ROOT"; OPENAPI_RC=$?
+  if [ "$OPENAPI_RC" -eq 2 ]; then
+    cat >&2 <<MSG
+
+COMMIT BLOCKED — the OpenAPI guard ITSELF crashed. It reached no verdict.
+
+This says nothing about this repo's API — the checker did not finish, so there is
+no finding above to act on. The error it printed is the thing to look at, and it
+belongs to claude-code-policy, not to this commit:
+
+  $GUARD --check $ROOT
+
+Do not bypass: a guard that cannot run is not permission to skip it.
+MSG
+    exit 1
+  elif [ "$OPENAPI_RC" -ne 0 ]; then
+    cat >&2 <<'MSG'
 
 COMMIT BLOCKED — this repo serves an HTTP API that is not OpenAPI-compliant.
 
@@ -112,7 +139,8 @@ Do not bypass with --no-verify. Run the `api-openapi-migrate` skill, or:
 Genuinely not an API? Add .openapi-policy.toml with waived=true, a reason and an
 owner. A waiver with nobody's name on it is not a waiver.
 MSG
-  exit 1
+    exit 1
+  fi
 fi
 
 # The committed spec must match what the code generates. A spec that drifts is
@@ -151,6 +179,7 @@ fi
 
 PY=""
 PY_FROM_VENV=0
+PY_KIND=none
 CANDIDATES=("$ROOT/.venv/bin/python" "$ROOT/venv/bin/python")
 if [ -n "$MAIN_ROOT" ] && [ "$MAIN_ROOT" != "$ROOT" ]; then
   CANDIDATES+=("$MAIN_ROOT/.venv/bin/python" "$MAIN_ROOT/venv/bin/python")
@@ -158,13 +187,107 @@ fi
 for c in "${CANDIDATES[@]}"; do
   [ -x "$c" ] || continue
   "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null \
-    && { PY="$c"; PY_FROM_VENV=1; break; }
+    && { PY="$c"; PY_CMD=("$c"); PY_KIND=venv; PY_FROM_VENV=1; break; }
 done
+
+# A REPO THAT DECLARES ITS DEPENDENCIES IS NOT AN UNKNOWN TOOLCHAIN.
+#
+# The probe above trusts exactly one shape: a venv DIRECTORY someone materialised. A repo
+# that declares its dependencies in a requirements file and materialises them on demand
+# has an equally known relationship to them -- a stronger one, in fact, because it comes
+# from the repo's own pins rather than from whatever was installed by hand and when.
+#
+# 🔴 MEASURED 2026-08-21, Translation-system: no root venv, deps in
+# `backend/requirements.txt`, so this probe fell through to the shell's python3 and
+# `scripts/gen_openapi.py` died on `ModuleNotFoundError: No module named 'jwt'`. The leg
+# took its fail-OPEN branch, announced SPEC DRIFT NOT CHECKED, and let the commit land.
+# The announcement is correct and by design; the consequence is that the spec-drift check
+# had never run in that repo. Counted the same day across the local clones, five distinct
+# products are in exactly that state -- Translation-system, phrase-monitor,
+# schedule-viewer, nexus and redirect-manager -- plus their worktrees and topic clones.
+#
+# WHY NOT JUST WIDEN THE VENV SEARCH TO SUBDIRECTORIES: it produces the WORSE failure.
+# Translation-system does carry a `backend/.venv` and it is STALE -- it cannot import
+# apiflask. Trusting it fails CLOSED and blocks a commit whose spec is provably correct;
+# regenerating from the declared pins reproduces docs/openapi.json byte for byte. A gate
+# that fires on correct code is the gate everyone learns to bypass.
+#
+# ONE LEVEL DOWN, because that is where these repos actually put it: `backend/` in four of
+# the five, `panel/` in proxmox-fleet-manager. Root first, then the shallowest match, so
+# the choice is deterministic rather than filesystem-order.
+#
+# `--no-project` keeps uv from trying to build the repo itself as a package -- most of
+# these have no pyproject.toml at all -- and mirrors what the suite legs in these repos
+# already run. Warm, it costs ~0.3s; the environment is cached between commits.
+if [ -z "$PY" ]; then
+  DECLARED_REQS=""
+
+  # A REPO MAY NAME THE FILE ITSELF, AND A NAME BEATS A SEARCH.
+  #
+  # The search below is a guess -- "the shallowest requirements.txt" -- and a guess is
+  # wrong exactly where a repo holds more than one project. 🔴 MEASURED 2026-08-21,
+  # google-access-migration: the root requirements.txt describes the `discovery/` tooling
+  # (PyJWT, cryptography, requests, PyYAML) while scripts/gen_openapi.py imports the
+  # console backend, whose pins live in console/backend/requirements.txt. The search took
+  # the root file, uv built an environment that could not import the app, and the leg read
+  # `ModuleNotFoundError: No module named 'apscheduler'` as this repo failing to declare a
+  # package it declares perfectly well, one directory over.
+  #
+  # Same discipline as `generator` in the same file (bin/policies/openapi.py,
+  # read_declared_generator): someone writes a file name down, the file has to exist, and
+  # a declaration resolving to nothing is REPORTED rather than silently ignored -- a
+  # declaration nobody can see failing is how a standard quietly dies. Regex-parsed for
+  # the same reason: this runs in whatever shell the person happens to have.
+  if [ -f "$ROOT/.openapi-policy.toml" ]; then
+    GEN_REQS_DECL="$(sed -n "s/^[[:space:]]*generator_requirements[[:space:]]*=[[:space:]]*[\"']\([^\"']*\)[\"'].*/\1/p" \
+                     "$ROOT/.openapi-policy.toml" 2>/dev/null | head -1)"
+    if [ -n "$GEN_REQS_DECL" ]; then
+      if [ -f "$ROOT/$GEN_REQS_DECL" ]; then
+        DECLARED_REQS="$ROOT/$GEN_REQS_DECL"
+      else
+        echo "warning: .openapi-policy.toml declares generator_requirements =" >&2
+        echo "         \"$GEN_REQS_DECL\", which is not a file in this repo. Falling back to" >&2
+        echo "         the search — fix the declaration or delete it." >&2
+      fi
+    fi
+  fi
+
+  if [ -z "$DECLARED_REQS" ]; then
+    for r in "$ROOT/requirements.txt" "$ROOT"/*/requirements.txt; do
+      [ -f "$r" ] && { DECLARED_REQS="$r"; break; }
+    done
+  fi
+  if [ -n "$DECLARED_REQS" ] && command -v uv >/dev/null 2>&1; then
+    # A repo pinning its own interpreter (`.python-version`) gets it: uv reads that file
+    # itself, and overriding it would build an environment the repo never runs.
+    if [ -f "$ROOT/.python-version" ]; then
+      DECLARED_CMD=(uv run --with-requirements "$DECLARED_REQS" --no-project python)
+    else
+      DECLARED_CMD=(uv run --python "${CLAUDE_OPENAPI_GATE_PYTHON:-3.12}" \
+                    --with-requirements "$DECLARED_REQS" --no-project python)
+    fi
+    # BUILD IT FIRST, and separately. A resolver that cannot reach an index, or a wheel
+    # that will not compile, is a broken toolchain -- NOT a drifted spec -- and the two
+    # must not arrive at the same verdict. Only once the environment exists does a
+    # generator failure become this repo's problem.
+    if DECLARED_ERR="$("${DECLARED_CMD[@]}" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>&1)"; then
+      PY_CMD=("${DECLARED_CMD[@]}")
+      PY="uv --with-requirements ${DECLARED_REQS#$ROOT/}"
+      PY_KIND=declared
+      PY_FROM_VENV=1
+    else
+      echo "warning: SPEC DRIFT NOT CHECKED — uv could not build the environment this repo" >&2
+      echo "         declares in ${DECLARED_REQS#$ROOT/}, so the generator has nothing to run in." >&2
+      echo "$DECLARED_ERR" | tail -3 >&2
+    fi
+  fi
+fi
+
 if [ -z "$PY" ]; then
   for c in python3.14 python3.13 python3.12 python3.11 python3; do
     command -v "$c" >/dev/null 2>&1 || continue
     "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null \
-      && { PY="$c"; break; }
+      && { PY="$c"; PY_CMD=("$c"); PY_KIND=bare; break; }
   done
 fi
 
@@ -176,8 +299,10 @@ if [ -f "$ROOT/scripts/gen_openapi.py" ] && [ -f "$ROOT/docs/openapi.json" ]; th
     echo "warning: no python >=3.11 found — SPEC DRIFT NOT CHECKED for this commit" >&2
   else
     BEFORE="$(shasum -a 256 "$ROOT/docs/openapi.json" 2>/dev/null | cut -d' ' -f1)"
-    if ! GEN_ERR="$("$PY" "$ROOT/scripts/gen_openapi.py" 2>&1)"; then
-      if [ "$PY_FROM_VENV" = "1" ]; then
+    SPEC_BACKUP="$(mktemp)"
+    cp "$ROOT/docs/openapi.json" "$SPEC_BACKUP" 2>/dev/null || true
+    if ! GEN_ERR="$("${PY_CMD[@]}" "$ROOT/scripts/gen_openapi.py" 2>&1)"; then
+      if [ "$PY_KIND" = "venv" ]; then
         # This interpreter came from a project venv (this checkout's or the
         # worktree's main checkout) — an environment that is SUPPOSED to have
         # this repo's dependencies installed. If the generator still fails here
@@ -201,6 +326,38 @@ commit, not just while the venv is stale.
 MSG
         exit 1
       fi
+
+      # A DECLARED ENVIRONMENT EARNS THE DRIFT COMPARISON, NOT A GENERATOR VERDICT.
+      #
+      # 🔴 TRIAGED AGAINST GROUND TRUTH 2026-08-21, before this path was allowed to block
+      # anything, across the seven repos that reach it. Five regenerated their spec byte
+      # for byte -- Translation-system, phrase-monitor, schedule-viewer, redirect-manager,
+      # proxmox-fleet-manager-th323. The other TWO failed for reasons that have nothing to
+      # do with the contract:
+      #
+      #   nexus            RuntimeError: Directory '.../backend/app/static/icons' does not
+      #                    exist -- a build artefact absent from a clean checkout. The
+      #                    environment was fine; it got as far as importing starlette.
+      #   gam-gmc-readonly ModuleNotFoundError: apscheduler -- the app imports a package
+      #                    its requirements.txt never declares. A real repo defect, and
+      #                    still not one this gate is for.
+      #
+      # Two in seven is a valve tripping on 29% of its candidates, which the org standard
+      # names as a defect report about the PREDICATE, never a reason to raise the cap. So
+      # the split is by what the failure can actually prove: a venv is a promise somebody
+      # made about THIS repo, and a broken one is that promise broken. A declaration is a
+      # list of packages; its failure may be a missing directory, an import at module
+      # scope, or a genuinely absent dependency -- indistinguishable from here.
+      #
+      # The win is unchanged and it is the whole point: the drift comparison BELOW now
+      # runs in these repos, where it had never run once.
+      if [ "$PY_KIND" = "declared" ]; then
+        echo "warning: SPEC DRIFT NOT CHECKED — scripts/gen_openapi.py failed in the" >&2
+        echo "         environment this repo declares in ${DECLARED_REQS#$ROOT/}." >&2
+        echo "$GEN_ERR" | tail -3 >&2
+        echo "         Reproduce it:  ${DECLARED_CMD[*]} scripts/gen_openapi.py" >&2
+        cp "$SPEC_BACKUP" "$ROOT/docs/openapi.json" 2>/dev/null || true
+      fi
       # No project venv was found at all — only a bare system interpreter with
       # no known relationship to this repo's dependencies. That is the genuine
       # broken-toolchain case the original design carved out: fail OPEN, but
@@ -209,7 +366,35 @@ MSG
       echo "$GEN_ERR" | tail -3 >&2
     else
       AFTER="$(shasum -a 256 "$ROOT/docs/openapi.json" 2>/dev/null | cut -d' ' -f1)"
-      if [ "$BEFORE" != "$AFTER" ]; then
+      if [ "$BEFORE" != "$AFTER" ] && [ "$PY_FROM_VENV" != "1" ]; then
+        # A BYTE DIFFERENCE FROM AN UNTRUSTED INTERPRETER IS NOT EVIDENCE OF DRIFT.
+        #
+        # The spec is not reproducible across framework versions: FastAPI injects its own
+        # ValidationError/HTTPValidationError schemas and their shape changes between
+        # releases. Measured 2026-08-20 on ONE workstation carrying four of them --
+        # /usr/bin/python3 (fastapi 0.116.1), the probe's first pick python3.14 (0.139.0),
+        # the shell's python3 (0.141.1), and the repo's own pinned venv (0.115.6, which is
+        # what the CT actually installs and runs). Four interpreters, four different
+        # docs/openapi.json from identical source, differing only in framework boilerplate.
+        #
+        # The probe below deliberately does not resolve what a developer's shell resolves, so
+        # this branch refused fleet-dns-map's arming commit with the source entirely correct,
+        # and its printed remedy -- regenerate and commit -- would have made the NEXT
+        # person's gate fire in the other direction. That is the shape of a gate everyone
+        # learns to bypass.
+        #
+        # So: the same carve-out the generator-failure branch above already makes. Only a
+        # PROJECT VENV has a known relationship to this repo's declared dependencies; a bare
+        # system interpreter does not, and a comparison against one cannot tell drift from a
+        # version difference. Fail OPEN, loudly, exactly like the other two branches -- and
+        # RESTORE the file, because leaving a spec generated by the wrong FastAPI in the tree
+        # is how that wrong spec gets committed.
+        cp "$SPEC_BACKUP" "$ROOT/docs/openapi.json" 2>/dev/null || true
+        echo "warning: SPEC DRIFT NOT CHECKED — regenerated with $PY, which is not a venv for" >&2
+        echo "         this repo, so a byte difference cannot be told from a framework-version" >&2
+        echo "         difference. docs/openapi.json was left untouched." >&2
+        echo "         To check it: create the repo's venv from its own pins, then re-commit." >&2
+      elif [ "$BEFORE" != "$AFTER" ]; then
         cat >&2 <<'MSG'
 
 COMMIT BLOCKED — docs/openapi.json was stale and has just been regenerated.
@@ -217,8 +402,10 @@ COMMIT BLOCKED — docs/openapi.json was stale and has just been regenerated.
 The routes changed but the committed contract did not. Review the diff (it is the
 API change, in reviewable form) and `git add docs/openapi.json`.
 MSG
+        rm -f "$SPEC_BACKUP"
         exit 1
       fi
+      rm -f "$SPEC_BACKUP"
     fi
   fi
 fi
@@ -248,8 +435,20 @@ fi
 AGUARD="$(_policy_bin alert-contract-guard.py)"
 if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$AGUARD" ]; then
   guard_unreachable "alert-contract gate" "not found at $AGUARD"
-elif ! python3 "$AGUARD" --check "$ROOT"; then
-  exit 1
+else
+  # Same distinction, same reason. This guard reserves 3 for COULD_NOT_RUN, and the
+  # shell discarding it meant a guard that never ran and a guard that refused ended the
+  # commit identically and silently.
+  python3 "$AGUARD" --check "$ROOT"; ALERT_RC=$?
+  if [ "$ALERT_RC" -eq 3 ]; then
+    echo "" >&2
+    echo "COMMIT BLOCKED — the alert-contract guard COULD NOT RUN. It reached no verdict." >&2
+    echo "  Nothing above is a finding about this change. Re-run; if it persists the thing" >&2
+    echo "  to look at is $AGUARD, not this repo." >&2
+    exit 1
+  elif [ "$ALERT_RC" -ne 0 ]; then
+    exit 1
+  fi
 fi
 
 # ── the GATE-OFFLOAD standard: a gate runs its suite on the RUNNER ───────────
@@ -284,6 +483,45 @@ if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$OFFLOAD_GUARD" ]; the
                     "not found at $OFFLOAD_GUARD"
 elif ! python3 "$OFFLOAD_GUARD" --check "$ROOT"; then
   exit 1
+fi
+
+# ── the PER-REPO AGENT FILE ceiling, as a RATCHET ────────────────────────────
+#
+# `claude-md-audit.py` has measured the two tiers since 2026-08-16 and the session rail
+# has reported them since. Measured 2026-08-24: NOTHING called `--check` from any hook —
+# not this file, not the template, not repo-contract-guard, not ci/validate.py. So the
+# ceiling was a number in a report seen only by whoever happened to open a session in
+# that repo, and repos sat at 400-500 lines for weeks against a standard of 120.
+#
+# It refuses `over the ceiling AND this commit made the file LONGER`, never the ceiling
+# alone. The absolute form was rejected on this file's own valve rule: 120 passes ~85% of
+# repos on day one, so refusing every commit in the remainder — including a one-line
+# bugfix that never touched the agent file — is precisely the gate everybody learns to
+# pass with --no-verify. Shrinking an over-budget file is ALWAYS allowed, even while it
+# is still over; a NEW agent file may not be born over the ceiling; a third-party repo is
+# reported and never refused.
+#
+# Draining the repos ALREADY over the line is `bin/claude-md-estate-sweep.py`, which
+# measures every org repo from GitHub. This gate stops the bleeding; the sweep drains it.
+#
+# Same fail-OPEN-but-LOUD discipline as every other block here.
+MD_GUARD="$(_policy_bin claude-md-repo-guard.py)"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$MD_GUARD" ]; then
+  guard_unreachable "claude-md repo gate — the one that stops an agent file growing" \
+                    "not found at $MD_GUARD"
+else
+  # Reserves 3 for COULD_NOT_RUN, like the alert-contract gate: a guard that never ran
+  # and a guard that refused must not end the commit identically and silently.
+  python3 "$MD_GUARD" --check "$ROOT"; MD_RC=$?
+  if [ "$MD_RC" -eq 3 ]; then
+    echo "" >&2
+    echo "COMMIT BLOCKED — the claude-md repo gate COULD NOT RUN. It reached no verdict." >&2
+    echo "  Nothing above is a finding about this change. Re-run; if it persists the thing" >&2
+    echo "  to look at is $MD_GUARD, not this repo." >&2
+    exit 1
+  elif [ "$MD_RC" -ne 0 ]; then
+    exit 1
+  fi
 fi
 
 # ── ruff, on the STAGED Python files only ────────────────────────────────────
@@ -358,6 +596,31 @@ elif ! python3 "$SECRET_GUARD" --check "$ROOT"; then
   exit 1
 fi
 
+# ── NO COMMIT CARRIES A HALF-FINISHED MERGE ──────────────────────────────────
+#
+# 2026-08-25: THREE org trunks were found carrying live conflict blocks, the oldest
+# for five days, every one of them landed through a GREEN gate. The worst was
+# `internal-knowledge-base`'s shared BOARD — the file sessions read to decide what is
+# claimed, done or open. It answered that question twice, in both directions, and was
+# noticed only when somebody hit a rebase conflict against the markers themselves.
+#
+# STAGED, NOT THE TREE. You are refused for what YOU are committing. A repo that
+# already carries a marker elsewhere is not held hostage over a file you never
+# touched — that is a gate everybody learns to bypass, which this file refuses to be.
+# `--all` is the audit sweep for the rest.
+#
+# Swept over 173 repos and 75,824 tracked text files before it was armed: four hits,
+# all real conflicts, zero false positives.
+CONFLICT_GUARD="$(_policy_bin tracked-conflict-marker-guard.py)"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$CONFLICT_GUARD" ]; then
+  guard_unreachable "conflict-marker gate — the one that refuses a half-finished merge" \
+                    "not found at $CONFLICT_GUARD"
+elif ! python3 "$CONFLICT_GUARD" --check "$ROOT"; then
+  echo "Do not bypass with --no-verify — both sides are still in the file, and that is" >&2
+  echo "the only moment at which that is true." >&2
+  exit 1
+fi
+
 if [ "$UNREACHABLE_GUARDS" -gt 0 ]; then
   cat >&2 <<MSG
 
@@ -378,5 +641,57 @@ if [ "$UNREACHABLE_GUARDS" -gt 0 ]; then
                    python3 \$HOME/.claude/policy-runtime/bin/workstation-converge.py --check
 MSG
 fi
+
+
+# ---------------------------------------------------------------------------
+# 🔴 NOTHING BELOW THIS LINE MAY INHERIT THIS COMMIT'S GIT LOCATION.
+#
+# Everything a repo appends BELOW this point runs here — in practice its own test
+# suite. Git exports GIT_DIR and GIT_INDEX_FILE into every hook and they override
+# both `cwd` and `git -C`, so a suite whose fixtures build throwaway repositories
+# has every git command redirected at THIS repository and at the TEMPORARY INDEX
+# git built for the commit in flight. The suite resets that index to HEAD; git
+# then writes a tree identical to HEAD's, records NOTHING, and reports success.
+#
+# MEASURED three times, none of them caught by a rail:
+#   * keycloak-security-monitor 2026-08-19 (its #62, where this exact placement
+#     was first proven): three commits in a row plus a fourth carrying an
+#     unrelated new file, all created EMPTY. `git diff --cached` showed 13 staged
+#     insertions while `git diff-tree HEAD` showed nothing. PR #61 merged one of
+#     them, said it fixed the org gates block, and left it broken on main.
+#   * whatsapp-supplier-manager 2026-08-20 (claude-gate-run's `_GIT_HOOK_ENV`):
+#     four consecutive commits, both rails green, no files at all.
+#   * github-access-manager 2026-08-20: PR #57 reached trunk as `cf84e7f` with
+#     zero files and was DEPLOYED that way.
+#
+# WHY IT LOOKED RANDOM, measured and pinned by
+# tests/test_precommit_template_scrub_order.py: git hands a hook a GIT_INDEX_FILE
+# that is RELATIVE for a plain commit (`.git/index`) and ABSOLUTE for a PATHSPEC
+# one (`/abs/.../next-index-N.lock`). A child running `git -C <fixture>` resolves
+# the relative form against the fixture and touches nothing; it cannot escape the
+# absolute one. So a suite run from here is dangerous exactly when the commit used
+# `git commit -- <paths>` — the form org discipline REQUIRES in a shared checkout,
+# and the form every commit that came out empty had used.
+#
+# pre-push has carried this unset since the 2026-08-13 internal-knowledge-base
+# incident. It was never swept here, which is the worse of the two places: pre-push
+# runs after the commit exists, this runs while git holds the index about to become
+# it. Counted 2026-08-20: 174 local checkouts run a suite from a pre-commit hook
+# with no scrub, against 90 that scrub.
+#
+# 🔴 ORDER IS THE DESIGN, AND IT IS THE WHOLE OF THE DESIGN. This sits BELOW every
+# gate above, which MUST keep GIT_INDEX_FILE: the ruff gate finds its work with
+# `git diff --cached`, and for a pathspec commit the set being committed exists
+# ONLY in that temporary index. Scrubbing any earlier makes those gates inspect the
+# wrong tree and pass a commit they never looked at — trading a silent corruption
+# for a silent non-check.
+#
+# NO-OP WHEN THIS FILE IS RUN AS A SUBPROCESS, and that is not an oversight: a
+# child cannot unset a variable in its parent. It is load-bearing only where these
+# lines are part of the HOOK FILE ITSELF — the generated `templates/githooks-pre-commit`
+# and the appended `templates/foreign-hook-org-gates-block.sh`, which is why the
+# same block is in both.
+unset GIT_DIR GIT_COMMON_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX \
+      GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
 exit 0
