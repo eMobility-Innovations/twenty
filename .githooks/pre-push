@@ -238,6 +238,47 @@ _pp_warn_idle_transport() {
 # Rows for other repositories are carried through untouched, never judged: this
 # working tree does not hold their objects, so an ancestry test here would call
 # somebody else's landed push a lost one.
+_pp_content_landed() {
+  # DID THIS COMMIT'S WORK REACH THE REMOTE UNDER A DIFFERENT SHA?
+  #
+  # WHY THIS EXISTS. The two questions above it — "is the sha on the ref" and "is it an
+  # ancestor of what the ref holds" — are BOTH answered "no" by a perfectly successful
+  # squash-merge, which is this estate's default: the branch is deleted, so `ls-remote`
+  # is empty and the ancestry block is skipped entirely; and a squash writes a NEW sha,
+  # so the original is an ancestor of nothing. Every PR merged the normal way therefore
+  # printed a red "NEVER LANDED" on somebody's next unrelated push. Measured 2026-08-30
+  # on `claude-usage-monitor` e99116e, which had landed as PR #178.
+  #
+  # THAT COST IS NOT COSMETIC. The rc=141 class this detector exists for is real and
+  # genuinely silent, and a detector that shouts on every success is exactly how its one
+  # true positive gets scrolled past — `gates.md` #3.
+  #
+  # IT FAILS CLOSED, DELIBERATELY. Every path that cannot PROVE the work arrived returns
+  # non-zero and the warning still prints. A missing network, an unreadable remote, an
+  # unknown default branch: all of those keep the alarm, because the whole point of the
+  # detector is the case where something really was lost.
+  _cl_url="$1"
+  _cl_sha="$2"
+  # The remote's default branch, which is where a merge lands however it was merged.
+  git fetch -q "$_cl_url" HEAD >/dev/null 2>&1 </dev/null || return 1
+  # (a) MERGED, NOT SQUASHED — the original sha is still reachable.
+  git merge-base --is-ancestor "$_cl_sha" FETCH_HEAD >/dev/null 2>&1 </dev/null && return 0
+  _cl_base="$(git merge-base FETCH_HEAD "$_cl_sha" 2>/dev/null </dev/null)"
+  [ -n "${_cl_base:-}" ] || return 1
+  # (b) SQUASHED — the sha is gone but the PATCH is not. Compare the branch's whole diff
+  #     against the merge base with each candidate commit's own diff: a squash of N
+  #     commits equals the combined patch, which per-commit `git cherry` cannot see.
+  _cl_mine="$(git diff "$_cl_base" "$_cl_sha" 2>/dev/null </dev/null | git patch-id --stable 2>/dev/null | awk '{print $1}')"
+  [ -n "${_cl_mine:-}" ] || return 1
+  # BOUNDED, because this runs on the path that is about to shout: a merge lands near the
+  # tip, and an unbounded walk on a busy trunk is a hook nobody keeps.
+  for _cl_c in $(git rev-list --max-count=200 "$_cl_base..FETCH_HEAD" 2>/dev/null </dev/null); do
+    _cl_theirs="$(git diff "$_cl_c^" "$_cl_c" 2>/dev/null </dev/null | git patch-id --stable 2>/dev/null | awk '{print $1}')"
+    [ "$_cl_theirs" = "$_cl_mine" ] && return 0
+  done
+  return 1
+}
+
 _pp_check_ledger() {
   [ -s "$PUSH_LEDGER" ] || return 0
   _keep="$(mktemp 2>/dev/null)" || return 0
@@ -258,6 +299,10 @@ _pp_check_ledger() {
       git fetch -q "$_url" "$_ref" >/dev/null 2>&1 </dev/null || true
       git merge-base --is-ancestor "$_sha" FETCH_HEAD >/dev/null 2>&1 </dev/null && continue
     fi
+    # THE REF BEING GONE IS NOT EVIDENCE OF LOSS — it is what squash-merge-and-delete
+    # leaves behind, and that is the normal end of every PR here. Ask the default branch
+    # whether the WORK arrived, under whatever sha the merge chose.
+    _pp_content_landed "$_url" "$_sha" && continue
     _lost=1
     printf '\n' >&2
     printf '🔴 pre-push: A PREVIOUS PUSH REPORTED "gates passed" AND NEVER LANDED.\n' >&2
@@ -268,7 +313,9 @@ _pp_check_ledger() {
     printf '    remote %s\n' "$_url" >&2
     printf '    remote currently holds: %s\n' "${_rsha:-<the ref does not exist there>}" >&2
     printf '\n' >&2
-    printf '    That commit is not on the remote and is not an ancestor of what is.\n' >&2
+    printf '    That commit is not on the remote, is not an ancestor of what is, and its\n' >&2
+    printf '    patch is not on the default branch under another sha — so a squash-merge\n' >&2
+    printf '    does NOT explain this, which is the one benign reading there was.\n' >&2
     printf '    This is the rc=141 class: the gate outlasted the transport idle timeout,\n' >&2
     printf '    git took SIGPIPE writing the pack, and the push exited non-zero with no\n' >&2
     printf '    message at all. Nothing was lost locally — push it again.\n' >&2
@@ -562,4 +609,4 @@ printf 'pre-push: GATES FAILED — push refused.\n' >&2
 printf 'pre-push: fix the code. To override deliberately, saying why:\n' >&2
 printf '    SKIP_VERIFY=1 SKIP_VERIFY_REASON="why" git push\n' >&2
 exit 1
-# gate-template-revision: 60588572
+# gate-template-revision: 2569e6b6
