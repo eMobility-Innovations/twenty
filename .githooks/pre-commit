@@ -13,6 +13,49 @@
 #
 # Inert rather than failing when the checker is absent: a gate that fails for
 # reasons unrelated to what it checks is a gate people learn to bypass.
+
+# 🔴 IS THIS COMMIT EVEN THE TREE THE GATES BELOW ARE ABOUT TO CERTIFY?
+#
+# `git commit -- <paths>`, `git commit <paths>`, `git commit -a` and
+# `git commit -i <paths>` do NOT commit `.git/index`. Git builds a SEPARATE temporary
+# index for them and points this hook's GIT_INDEX_FILE at it. Everything this hook runs
+# AFTER the scrub at the bottom — in practice this repo's own suite, and any
+# `claude-gate-run` behind it — can then only see `.git/index`, a tree nobody is
+# committing, and returns a verdict about it in the same words it uses for a real one.
+#
+# MEASURED 2026-08-30 on claude-code-policy (internal-knowledge-base
+# findings/2026-08-30_a-partial-commit-is-gated-against-a-tree-it-will-not-create.md):
+# an anchor deleted in the working tree only and committed with `git commit -- <path>`
+# made the mutation rung find nothing staged, fall back to `HEAD~1..HEAD`, and print
+# `PASS` about the PREVIOUS commit's guards.
+#
+# WHY IT IS HERE, IN THE HEADER, AND NOT IN THE GATE BODY BELOW. The body of this file
+# is GENERATED from `bin/org-precommit-gates.sh`, which every repo with a hook of its
+# own also invokes as a subprocess — so a line added there arms every one of those repos
+# too. Operator decision 2026-08-30: arm the repos whose hook is DERIVED from this
+# template, which are the ones that append a suite BELOW the scrub, and NOT the foreign
+# callers, whose org gates run ABOVE the scrub and therefore already read the in-flight
+# index correctly. This header is the only part of the generated template that is not
+# shared with the runner, so it is the only place that decision can be expressed.
+# `tests/test_commit_scope.py` pins BOTH halves — that it is here, and that it is not
+# there.
+#
+# Costs one `basename` when there is nothing to say: the check returns before running
+# git at all for every ordinary commit, every `--amend` and every `--allow-empty`.
+#
+# Runtime FIRST, developer checkout SECOND — same resolution as the org gates below, and
+# for the same reason: a checkout can be parked on a branch where the file does not
+# exist. Inert-but-LOUD when neither carries it; an absent gate that says nothing is
+# indistinguishable from one that passed.
+_COMMIT_SCOPE="${CLAUDE_POLICY_RUNTIME:-${HOME:-}/.claude/policy-runtime}/bin/policies/commit-scope.py"
+[ -f "$_COMMIT_SCOPE" ] || _COMMIT_SCOPE="${HOME:-}/Projects/claude-code-policy/bin/policies/commit-scope.py"
+if [ -f "$_COMMIT_SCOPE" ]; then
+  python3 "$_COMMIT_SCOPE" --precommit || exit 1
+else
+  echo "  ⚠ SKIPPED: the commit-scope gate — whether this commit is the tree the gates" >&2
+  echo "    below will certify. Not found at: $_COMMIT_SCOPE" >&2
+  echo "    The commit is ALLOWED, and that is a fact about this MACHINE, not this change." >&2
+fi
 set -uo pipefail
 
 # HOME is NOT guaranteed. A commit made by a systemd service has no HOME, and
@@ -318,11 +361,26 @@ a project venv that is supposed to have this repo's dependencies.
 $(echo "$GEN_ERR" | tail -5)
 
 Spec drift could not be verified, and this is not a missing-toolchain case: a
-venv was found for this exact repo. Fix the venv, then retry:
-  $MAIN_ROOT/.venv/bin/pip install -r requirements.txt   # or requirements-dev.txt
+venv was found for this exact repo. Fix THAT venv -- the one named above, which
+is the one that failed:
+  ${PY%/python}/pip install -r requirements.txt   # or requirements-dev.txt
 
 Do not bypass with --no-verify — that skips this check permanently for this
-commit, not just while the venv is stale.
+commit, not just while the venv is stale.$(
+  if [ "$PY" != "$MAIN_ROOT/.venv/bin/python" ] && [ "$PY" != "$MAIN_ROOT/venv/bin/python" ] \
+     && [ -n "$MAIN_ROOT" ] && [ "$MAIN_ROOT" != "$ROOT" ]; then
+    printf '%s' "
+
+NOTE: that venv is INSIDE this worktree ($ROOT), not the main checkout. It is
+searched first. A provisioning script that created it and then failed partway --
+a private dependency it could not clone, no network -- leaves exactly this: a
+python that runs, with the dependencies missing. The main checkout's venv at
+$MAIN_ROOT may be perfectly fine and is NOT the one that failed, so installing
+there will not clear this. Either finish provisioning the one above, or delete
+it so the main checkout's is used:
+  rm -rf ${PY%/bin/python}"
+  fi
+)
 MSG
         exit 1
       fi
@@ -445,7 +503,14 @@ else
     echo "COMMIT BLOCKED — the alert-contract guard COULD NOT RUN. It reached no verdict." >&2
     echo "  Nothing above is a finding about this change. Re-run; if it persists the thing" >&2
     echo "  to look at is $AGUARD, not this repo." >&2
-    exit 1
+    # 125, NOT 1, AND THAT IS THE POINT. The sentence above is for a human; the CODE is
+    # for `merge-result.py`, which runs a repo's core.hooksPath pre-commit as its merge
+    # gate (GATE_HOOK_NAMES) and reads nothing but the status, where COULD_NOT_RUN = 125.
+    # Collapsed to 1, a gate that NEVER ANSWERED is indistinguishable from a branch that
+    # genuinely failed: the real red gets retried and the unrunnable guard gets blamed on
+    # the change. Still non-zero — nothing about BLOCKING changes, and a gate that cannot
+    # RUN is still not permission to skip it.
+    exit 125
   elif [ "$ALERT_RC" -ne 0 ]; then
     exit 1
   fi
@@ -518,7 +583,14 @@ else
     echo "COMMIT BLOCKED — the claude-md repo gate COULD NOT RUN. It reached no verdict." >&2
     echo "  Nothing above is a finding about this change. Re-run; if it persists the thing" >&2
     echo "  to look at is $MD_GUARD, not this repo." >&2
-    exit 1
+    # 125, NOT 1, AND THAT IS THE POINT. The sentence above is for a human; the CODE is
+    # for `merge-result.py`, which runs a repo's core.hooksPath pre-commit as its merge
+    # gate (GATE_HOOK_NAMES) and reads nothing but the status, where COULD_NOT_RUN = 125.
+    # Collapsed to 1, a gate that NEVER ANSWERED is indistinguishable from a branch that
+    # genuinely failed: the real red gets retried and the unrunnable guard gets blamed on
+    # the change. Still non-zero — nothing about BLOCKING changes, and a gate that cannot
+    # RUN is still not permission to skip it.
+    exit 125
   elif [ "$MD_RC" -ne 0 ]; then
     exit 1
   fi
@@ -686,6 +758,107 @@ fi
 # wrong tree and pass a commit they never looked at — trading a silent corruption
 # for a silent non-check.
 #
+# ── GATE: bash32-set-u-lint ──────────────────────────────────────────────────────────────────
+# Flags a NEWLY-STAGED bash shape that aborts under `set -u` on bash < 4.4 and is harmless on
+# 5.x — so production (Debian, bash 5.2) never sees it and only a workstation does.
+#
+#   1. `for x in "${arr[@]}"` — on bash < 4.4 an EMPTY array counts as UNSET under `set -u`.
+#      Fix: `for x in ${arr[@]+"${arr[@]}"}`.
+#      A `[[ -n "${input}" ]]` guard upstream does NOT make it safe. MEASURED 2026-08-30 on
+#      /bin/bash 3.2.57: an input of a bare newline passes `-n` and still leaves `read -ra` with
+#      ZERO elements, because `read` consumes the newline as its line terminator.
+#   2. `local a="$1" b="...${a}..."` — `local` marks EVERY name on the line before expanding any
+#      right-hand side, so `b`'s RHS reads the OUTER `a`, unbound under `set -u`.
+#      Fix: two statements. `local a="$1" b; b="...${a}..."` is already correct.
+#
+# Both shapes exit **127** on /bin/bash 3.2.57, measured rather than assumed.
+#
+# WHY IT IS AN ORG GATE. The class is a property of the bash a script is RUN under, not of the
+# repo it lives in, so a per-repo hook could only ever cover the repo that thought to add one.
+# It was found and fixed FOUR times in `proxmox-automations` before anything looked for the
+# class, and a sweep of 178 estate repos on 2026-08-30 — each tree read from `origin/main`, not
+# from a checkout — found it in 23 more. It bites in AGENT shells specifically: a login zsh on
+# macOS resolves `bash` to Homebrew 5.3 because /opt/homebrew/bin leads PATH, while an agent
+# shell's PATH does not carry that entry and `#!/usr/bin/env bash` gets /bin/bash 3.2.57.
+#
+# WHY THE PREDICATE IS NARROW. Its first version found 49 sites in one repo, 31 in production
+# scripts, and triage against ground truth made ALL 31 false positives. A later version was 37%
+# false on a quoted array literal. A detector that fires on nearly every candidate is a defect
+# report about its predicate, not a class to sweep — see bin/bash32-set-u-lint.awk, which
+# documents each narrowing and what it costs.
+#
+# SCOPED TO THE LINES THIS COMMIT ADDS. The predicate needs the WHOLE file (it has to know how
+# an array is filled before it can judge a use of it), so it runs over the working tree and its
+# findings are intersected with the staged added lines. Pre-existing sites stay silent: a check
+# that reports a 65-site backlog on every unrelated commit in every repo is one everybody learns
+# to skip, and this one lands in 16+ repos at once.
+#
+# ── ESCALATION ───────────────────────────────────────────────────────────────────────────────
+# WARN-ONLY, and it does NOT touch this script's exit status. The true-positive rate on NEW code
+# has not been observed yet — the rates above are on code already written. To make it BLOCKING
+# once it has, flip the single constant below from 0 to 1.
+BASH32_SET_U_LINT_BLOCKING=0
+
+B32_AWK="$(_policy_bin bash32-set-u-lint.awk)"
+STAGED_SH="$(git diff --cached --name-only --diff-filter=ACM -z -- '*.sh' 2>/dev/null \
+             | tr '\0' '\n' | sed '/^$/d')"
+_b32_hits=0
+
+if [ -n "$STAGED_SH" ] && [ ! -f "$B32_AWK" ]; then
+  # ANNOUNCED, but only when there is shell in the commit. An absent gate that says nothing is
+  # indistinguishable from one that passed — but a repo staging no shell has nothing for this
+  # gate to check, and saying so on every Python commit in 16 repos is how a notice becomes
+  # wallpaper.
+  guard_unreachable "bash32-set-u lint" "not found at $B32_AWK"
+elif [ -n "$STAGED_SH" ]; then
+  while IFS= read -r _b32_f; do
+    [ -z "$_b32_f" ] && continue
+    [ -f "$_b32_f" ] || continue     # renamed-away, or not a regular file in the working tree
+    # Only a script that actually enables `set -u` can be bitten by either shape.
+    grep -qE '^[[:space:]]*set[[:space:]]+-[a-z]*u' "$_b32_f" 2>/dev/null || continue
+
+    # New-file line numbers of every line this commit ADDS, from the staged diff with zero
+    # context so each hunk header gives the exact starting line of the added run beneath it.
+    _b32_added="$(git diff --cached --unified=0 -- "$_b32_f" 2>/dev/null | awk '
+      /^\+\+\+/ { next }
+      /^@@ /       { h = $0; sub(/^.*\+/, "", h); sub(/ .*$/, "", h)
+                     split(h, a, ","); ln = a[1] + 0; next }
+      /^\+/       { print ln; ln++ }
+    ')"
+    [ -n "$_b32_added" ] || continue
+
+    while IFS= read -r _b32_hit; do
+      [ -z "$_b32_hit" ] && continue
+      _b32_line="$(printf '%s\n' "$_b32_hit" | cut -d: -f2)"
+      printf '%s\n' "$_b32_added" | grep -qx "$_b32_line" || continue
+      _b32_shape="$(printf '%s\n' "$_b32_hit" | cut -d: -f3)"
+      _b32_name="$(printf '%s\n' "$_b32_hit" | cut -d: -f4)"
+      if [ "$_b32_shape" = "unguarded-array-expansion" ]; then
+        echo "[bash32-set-u-lint] WARN: ${_b32_f}:${_b32_line}: \`for x in \"\${${_b32_name}[@]}\"\` — on bash < 4.4 an EMPTY array is UNSET under set -u." >&2
+        echo "  \`${_b32_name}\` is filled from a source that can yield zero elements and nothing tests \${#${_b32_name}[@]} first." >&2
+        echo "  prefer:  for x in \${${_b32_name}[@]+\"\${${_b32_name}[@]}\"}; do" >&2
+      else
+        echo "[bash32-set-u-lint] WARN: ${_b32_f}:${_b32_line}: a later name on this \`local\` reads \`${_b32_name}\`, declared on the same line." >&2
+        echo "  \`local\` marks every name before expanding any RHS, so that read is unbound under set -u on bash < 4.4." >&2
+        echo "  prefer:  local ${_b32_name}=...; local other=\"...\${${_b32_name}}...\"      (two statements)" >&2
+      fi
+      echo "  measured on /bin/bash 3.2.57 (macOS): both shapes abort with rc=127. An AGENT shell gets that bash; your login shell does not." >&2
+      _b32_hits=$((_b32_hits + 1))
+    done <<B32EOF
+$(awk -v path="$_b32_f" -f "$B32_AWK" PASS=1 "$_b32_f" PASS=2 "$_b32_f" 2>/dev/null)
+B32EOF
+  done <<B32FILES
+$STAGED_SH
+B32FILES
+fi
+
+if [ "$_b32_hits" -gt 0 ]; then
+  echo "[bash32-set-u-lint] ${_b32_hits} new site(s) found. WARN-ONLY — commit proceeds." >&2
+  if [ "$BASH32_SET_U_LINT_BLOCKING" = "1" ]; then
+    exit 1
+  fi
+fi
+
 # NO-OP WHEN THIS FILE IS RUN AS A SUBPROCESS, and that is not an oversight: a
 # child cannot unset a variable in its parent. It is load-bearing only where these
 # lines are part of the HOOK FILE ITSELF — the generated `templates/githooks-pre-commit`
