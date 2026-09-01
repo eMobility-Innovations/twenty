@@ -693,6 +693,49 @@ elif ! python3 "$CONFLICT_GUARD" --check "$ROOT"; then
   exit 1
 fi
 
+# ── the assertion-pipe-inversion gate — WARN ONLY, deliberately ──────────────────────
+# Sibling of policies/pipeline-status.py: that one refuses a MASKED exit status read as
+# success, this one refuses a status REPLACED by an innocent bystander's death.
+#
+#     printf '%s' "$out" | grep -q PATTERN        # in a file that sets pipefail
+#
+# `grep -q` exits on the match and closes the pipe; the writer dies of SIGPIPE and
+# pipefail makes THAT the pipeline's verdict, so a MATCH reads as a MISS. Measured
+# 2026-08-31: 99.8% inversion once the payload passes the 64 KiB pipe buffer, across
+# 186 sites in 9 repos. The SHAPE is lethal under `set -e` (reproduced in isolation at
+# rc 141, the next statement never running), but NO file in this repo pairs it with `-e`:
+# here the harm is a WRONG BRANCH, not an abort. Read severity off the file, not the shape.
+#
+# ⚠️ WHY IT DOES NOT BLOCK YET. Arming it before the estate is swept refuses commits in
+# every unswept repo AT ONCE — a different outage from the one it prevents. It warns,
+# loudly, and names the fix. Arm it deliberately, per repo or estate-wide, with
+# CLAUDE_ASSERTION_PIPE_GUARD=enforce; the guard then exits 1 here and this block blocks
+# with no further edit. That is an operator decision, not this file's.
+#
+# ARMING IS PER REPO, in policy/assertion-pipe-armed.json — not a bare env var. The
+# decision taken 2026-08-31 was to arm FOUR repos and deliberately spare a fifth, which
+# no environment variable can express. CLAUDE_ASSERTION_PIPE_GUARD=enforce still forces
+# it on for one shell.
+PIPEINV_GUARD="$(_policy_bin assertion-pipe-inversion-guard.py)"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$PIPEINV_GUARD" ]; then
+  guard_unreachable "assertion-pipe-inversion gate — the one that catches an assertion that reports the WRITER's death" \
+                    "not found at $PIPEINV_GUARD"
+else
+  #: rc 2 IS NOT rc 1. The guard exits 2 when it could not READ what it needed — a tree
+  #: that tracks nothing, an unreadable arming manifest — and calling that a refusal would
+  #: blame the change for a fault in the machine. It is counted as a gate that DID NOT RUN,
+  #: which is the channel that exists for exactly this.
+  python3 "$PIPEINV_GUARD" --check "$ROOT"
+  PIPEINV_RC=$?
+  if [ "$PIPEINV_RC" -eq 2 ]; then
+    guard_unreachable "assertion-pipe-inversion gate — the one that catches an assertion that reports the WRITER's death" \
+                      "it could not read what it needed — see the CANNOT RUN line above"
+  elif [ "$PIPEINV_RC" -ne 0 ]; then
+    echo "That gate is ARMED for this repo — see the ARMED line above." >&2
+    exit 1
+  fi
+fi
+
 if [ "$UNREACHABLE_GUARDS" -gt 0 ]; then
   cat >&2 <<MSG
 
@@ -830,7 +873,7 @@ elif [ -n "$STAGED_SH" ]; then
     while IFS= read -r _b32_hit; do
       [ -z "$_b32_hit" ] && continue
       _b32_line="$(printf '%s\n' "$_b32_hit" | cut -d: -f2)"
-      printf '%s\n' "$_b32_added" | grep -qx "$_b32_line" || continue
+      grep -qx "$_b32_line" <<<"$_b32_added" || continue
       _b32_shape="$(printf '%s\n' "$_b32_hit" | cut -d: -f3)"
       _b32_name="$(printf '%s\n' "$_b32_hit" | cut -d: -f4)"
       if [ "$_b32_shape" = "unguarded-array-expansion" ]; then
