@@ -693,6 +693,49 @@ elif ! python3 "$CONFLICT_GUARD" --check "$ROOT"; then
   exit 1
 fi
 
+# ── the assertion-pipe-inversion gate — WARN ONLY, deliberately ──────────────────────
+# Sibling of policies/pipeline-status.py: that one refuses a MASKED exit status read as
+# success, this one refuses a status REPLACED by an innocent bystander's death.
+#
+#     printf '%s' "$out" | grep -q PATTERN        # in a file that sets pipefail
+#
+# `grep -q` exits on the match and closes the pipe; the writer dies of SIGPIPE and
+# pipefail makes THAT the pipeline's verdict, so a MATCH reads as a MISS. Measured
+# 2026-08-31: 99.8% inversion once the payload passes the 64 KiB pipe buffer, across
+# 186 sites in 9 repos. The SHAPE is lethal under `set -e` (reproduced in isolation at
+# rc 141, the next statement never running), but NO file in this repo pairs it with `-e`:
+# here the harm is a WRONG BRANCH, not an abort. Read severity off the file, not the shape.
+#
+# ⚠️ WHY IT DOES NOT BLOCK YET. Arming it before the estate is swept refuses commits in
+# every unswept repo AT ONCE — a different outage from the one it prevents. It warns,
+# loudly, and names the fix. Arm it deliberately, per repo or estate-wide, with
+# CLAUDE_ASSERTION_PIPE_GUARD=enforce; the guard then exits 1 here and this block blocks
+# with no further edit. That is an operator decision, not this file's.
+#
+# ARMING IS PER REPO, in policy/assertion-pipe-armed.json — not a bare env var. The
+# decision taken 2026-08-31 was to arm FOUR repos and deliberately spare a fifth, which
+# no environment variable can express. CLAUDE_ASSERTION_PIPE_GUARD=enforce still forces
+# it on for one shell.
+PIPEINV_GUARD="$(_policy_bin assertion-pipe-inversion-guard.py)"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$PIPEINV_GUARD" ]; then
+  guard_unreachable "assertion-pipe-inversion gate — the one that catches an assertion that reports the WRITER's death" \
+                    "not found at $PIPEINV_GUARD"
+else
+  #: rc 2 IS NOT rc 1. The guard exits 2 when it could not READ what it needed — a tree
+  #: that tracks nothing, an unreadable arming manifest — and calling that a refusal would
+  #: blame the change for a fault in the machine. It is counted as a gate that DID NOT RUN,
+  #: which is the channel that exists for exactly this.
+  python3 "$PIPEINV_GUARD" --check "$ROOT"
+  PIPEINV_RC=$?
+  if [ "$PIPEINV_RC" -eq 2 ]; then
+    guard_unreachable "assertion-pipe-inversion gate — the one that catches an assertion that reports the WRITER's death" \
+                      "it could not read what it needed — see the CANNOT RUN line above"
+  elif [ "$PIPEINV_RC" -ne 0 ]; then
+    echo "That gate is ARMED for this repo — see the ARMED line above." >&2
+    exit 1
+  fi
+fi
+
 if [ "$UNREACHABLE_GUARDS" -gt 0 ]; then
   cat >&2 <<MSG
 
@@ -712,6 +755,83 @@ if [ "$UNREACHABLE_GUARDS" -gt 0 ]; then
                  later than its branch simply do not exist in it. Check with:
                    python3 \$HOME/.claude/policy-runtime/bin/workstation-converge.py --check
 MSG
+fi
+
+
+# ── GATE: mutation-residue ───────────────────────────────────────────────────────────────────
+# REFUSE a commit that would capture a file a mutation harness is part-way through rewriting.
+#
+# THE SCAR, measured 2026-08-31 (claude-code-config
+# docs/finds/2026-08-31_mutation-harness-poisons-the-tree-if-killed.md). A harness run was
+# KILLED. Its `trap restore EXIT` never ran -- EXIT traps do not run on SIGKILL -- so the worker
+# file was left carrying TWO live mutations, one of them the guard that stops a recovery being
+# posted for a condition the host never opened. A COMMIT MADE WHILE THAT STATE EXISTED CAPTURED
+# THEM, and `git status` was clean at that moment: a mutation IS the file, and nothing
+# distinguishes one from an edit. A later run's EXIT trap then restored the working tree, so the
+# commit stayed poisoned while `git diff` began showing the guard being "removed" by the restore
+# -- which reads exactly backwards.
+#
+# THE ANCHOR ALREADY EXISTS AND IS NOT INVENTED HERE. `<file>.pristine` is written by
+# claude-code-config's `claude/hooks/mutation-pristine.sh` before the first substitution and
+# dropped only after a restore that returned 0, so it is present exactly across the window in
+# which the file on disk may be a mutant. That file's own docstring names THIS gate as the half
+# it deliberately does not cover: "It does not stop a commit capturing a mutation while a run is
+# genuinely in flight -- that is the pre-commit anchor audit."
+#
+# WHY IT COMPARES BYTES AND NOT A LIST OF REPLACEMENT STRINGS. The first design was a manifest
+# of every <find>/<replace> pair the harness substitutes, refusing staged content containing any
+# <replace> form. Measured against the harnesses that actually exist, that cannot work:
+# `test-claude-mem-embed-alerting-mutations.sh` substitutes the literal string `        else:`,
+# which appears in almost every Python file anyone stages -- and a gate that blocks every commit
+# is one everybody learns to bypass. Two of the three harnesses in that tree take an arbitrary
+# Python EXPRESSION over `src` rather than a pair at all, so for them there is nothing to
+# enumerate. The snapshot is the truth the mutation was taken FROM, so comparing against it is
+# exact for every harness, needs no pair extraction, and cannot be evaded by a regex- or
+# eval-shaped mutation.
+#
+# WHY IT IS AN ORG GATE. Nothing here is one repo's problem: it is a property of running a
+# mutation harness inside a git checkout at all, and a per-repo hook would only ever cover the
+# repo that thought to add one.
+_mut_hits=0
+_MUT_STAGED="$(git diff --cached --name-only --diff-filter=ACM -z 2>/dev/null \
+               | tr '\0' '\n' | sed '/^$/d')"
+if [ -n "$_MUT_STAGED" ]; then
+  while IFS= read -r _mut_f; do
+    [ -z "$_mut_f" ] && continue
+    case "$_mut_f" in
+      *.pristine)
+        # ONLY when the file it names is there too. An unrelated fixture that happens to end
+        # in `.pristine` is not this convention, and a gate that bricks such a repo for ever
+        # is a worse defect than the one it guards.
+        [ -e "${_mut_f%.pristine}" ] || continue
+        echo "[mutation-residue] REFUSING: $_mut_f is a mutation-harness snapshot of ${_mut_f%.pristine} and must not be committed." >&2
+        echo "  It exists only while a harness is mid-run, or after one was killed. Committed, it" >&2
+        echo "  says that for ever, and it is the ONLY correct copy of the file it names." >&2
+        _mut_hits=$((_mut_hits + 1))
+        continue ;;
+    esac
+    [ -e "$_mut_f.pristine" ] || continue
+    # THE INDEX, NOT THE WORKING TREE. What a commit captures is the staged blob, and for a
+    # pathspec commit that is the only place the set being committed exists at all.
+    git show ":$_mut_f" 2>/dev/null | cmp -s - "$_mut_f.pristine" && continue
+    echo "[mutation-residue] REFUSING: what is STAGED for $_mut_f differs from $_mut_f.pristine," >&2
+    echo "  which exists only while a mutation harness is rewriting that file. What you are about" >&2
+    echo "  to commit is probably a MUTANT, and a commit that captures one stays poisoned after" >&2
+    echo "  the working tree is put back." >&2
+    echo "  A run IN FLIGHT: wait for it to finish." >&2
+    echo "  A run that was KILLED: re-run the harness — it restores from the snapshot and refuses" >&2
+    echo "  — then commit." >&2
+    echo "  A DELIBERATE edit to a file carrying a stale snapshot: diff it against the snapshot," >&2
+    echo "  then delete $_mut_f.pristine." >&2
+    _mut_hits=$((_mut_hits + 1))
+  done <<MUTFILES
+$_MUT_STAGED
+MUTFILES
+fi
+
+if [ "$_mut_hits" -gt 0 ]; then
+  echo "[mutation-residue] ${_mut_hits} staged path(s) under a live mutation snapshot. COMMIT BLOCKED." >&2
+  exit 1
 fi
 
 
@@ -830,7 +950,7 @@ elif [ -n "$STAGED_SH" ]; then
     while IFS= read -r _b32_hit; do
       [ -z "$_b32_hit" ] && continue
       _b32_line="$(printf '%s\n' "$_b32_hit" | cut -d: -f2)"
-      printf '%s\n' "$_b32_added" | grep -qx "$_b32_line" || continue
+      grep -qx "$_b32_line" <<<"$_b32_added" || continue
       _b32_shape="$(printf '%s\n' "$_b32_hit" | cut -d: -f3)"
       _b32_name="$(printf '%s\n' "$_b32_hit" | cut -d: -f4)"
       if [ "$_b32_shape" = "unguarded-array-expansion" ]; then
