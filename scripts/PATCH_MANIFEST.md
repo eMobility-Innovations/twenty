@@ -11,9 +11,11 @@ upstream checkout (backing up originals to `.esc-originals/`); re-running
 - **Branch:** `esc/enterprise-sso-overlay`
 - **Upstream base:** `eMobility-Innovations/twenty` @ `emobility-unity` (a fork of
   `twentyhq/twenty`), Twenty **v2.0.x** line.
-- **Last updated:** 2026-06-04
-- **Status:** scaffold only — patch authored in the overlay, image NOT yet built,
-  CT 175 NOT yet touched (see the handover in `docs/handovers/`).
+- **Last updated:** 2026-09-09
+- **Status:** LIVE. Option B (compiled patches on the official image) is what runs on
+  CT 175 as `twenty-esc-sso:*`. The "scaffold only, image NOT yet built" line that stood
+  here was true on 2026-06-04 and wrong from 2026-06-05 onward — the image was built and
+  deployed the next day and SSO was confirmed end-to-end on 2026-06-07.
 
 ---
 
@@ -26,7 +28,28 @@ ESC runs a self-hosted Twenty instance (`esc.crm.fiszu.com`, CT 175 stack
    so SAML / generic-OIDC SSO (our **Keycloak** `fiszu` realm) and the SSO settings
    UI work without a paid, remotely-validated `ENTERPRISE_KEY`.
 
+2. **An exact-match SSRF allowlist** (`esc/deploy/patch-ssrf-allowlist.cjs`) — Twenty's
+   workflow HTTP_REQUEST action refuses any host resolving to a private address, fails
+   closed, and re-checks after DNS, with no allowlist upstream. One short-circuit at the
+   top of `isPrivateIp` — the single predicate BOTH the hostname check and the post-DNS
+   socket check use — treats an address named in `ESC_SSRF_ALLOWED_HOSTS` as public.
+
+   With the variable unset or empty the guard is **exactly** upstream's, so the default
+   is the safe one. The match is exact on the address, never a range: a CIDR here would
+   quietly re-open the whole estate to anyone who can author a workflow.
+
+   Authorised 2026-09-08 (Amir) for C4 / Redmine #14830: a workflow button that rebuilds
+   ONE customer's interest profile by calling `twenty-ingest` on CT 175. The alternative
+   was publishing that endpoint on the public internet, a larger exposure than naming one
+   host here.
+
 That is the entire patch surface today. Everything else is upstream-stock.
+
+**Verifying what is RUNNING:** `scripts/verify-esc-features.sh` checks the source overlay;
+`scripts/verify-esc-image.sh` checks the built image inside the running container. Use the
+second one after any upgrade — an option-B patch lives only in the image, so a rebuild from
+a new upstream tag that skips the patch scripts produces a healthy container that has
+silently lost them.
 
 ---
 
