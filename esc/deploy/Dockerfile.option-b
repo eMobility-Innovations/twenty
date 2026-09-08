@@ -1,8 +1,19 @@
 # Option B — thin overlay on the official image (DEPLOYED to CT 175 twenty-esc).
-# Patches all 4 enterprise-validity methods so the enterprise gate is fully bypassed
-# (backend SSO guard + frontend banner/Security-settings). Re-apply on upgrade by
-# bumping the FROM tag and rebuilding. See patch-enterprise.cjs for the exact patch.
+#
+# Two patches, both on the COMPILED image, both re-applied by bumping the FROM tag and
+# rebuilding:
+#
+#  1. patch-enterprise.cjs      — all 4 enterprise-validity methods, so the enterprise
+#     gate is fully bypassed (backend SSO guard + frontend banner/Security settings).
+#  2. patch-ssrf-allowlist.cjs  — an EXACT-MATCH allowlist on the private-IP guard, so a
+#     workflow can call one named internal endpoint. Fails closed: with
+#     ESC_SSRF_ALLOWED_HOSTS unset the guard is exactly upstream's.
+#
+# Each patch exits non-zero if its anchor is missing, so an upstream change that moves
+# the code fails the BUILD rather than shipping an image that silently lost a patch.
 FROM twentycrm/twenty:v2.0.0
 USER root
 COPY patch-enterprise.cjs /tmp/patch-enterprise.cjs
+COPY patch-ssrf-allowlist.cjs /tmp/patch-ssrf-allowlist.cjs
 RUN node /tmp/patch-enterprise.cjs && rm /tmp/patch-enterprise.cjs
+RUN node /tmp/patch-ssrf-allowlist.cjs && rm /tmp/patch-ssrf-allowlist.cjs

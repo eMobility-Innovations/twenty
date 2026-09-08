@@ -47,3 +47,60 @@ Restore `/root/twenty-esc/docker-compose.yml.bak.*` (→ official `twentycrm/twe
 
 ### Note: the "Security" settings nav still doesn't render for admins
 SSO works without it (provider lives in the DB). If you later need the in-UI SSO manager, that nav has an extra frontend gate not covered by the backend patch — a follow-up, not a blocker.
+
+
+---
+
+## 2026-09-09 — SSRF allowlist, and the image now running
+
+Image on CT 175 is **`twenty-esc-sso:v2.0.0-ssrf1`**, built from `esc/deploy/Dockerfile.option-b`,
+which now applies TWO compiled patches: the enterprise bypass and
+`patch-ssrf-allowlist.cjs`.
+
+**Why the second patch exists.** Twenty's workflow `HTTP_REQUEST` action refuses any host that
+resolves to a private address ("Request to internal IP address 192.168.103.175 is not allowed"),
+fails closed, and re-checks after DNS. Upstream has no allowlist. C4 (Redmine #14830) needs exactly
+one internal endpoint callable from a workflow — `twenty-ingest` on CT 175, which rebuilds ONE
+customer's interest profile. The alternative was publishing that endpoint on the public internet,
+a larger exposure than naming one host. Authorised by Amir, 2026-09-08.
+
+**What it does.** One short-circuit at the top of `isPrivateIp` — the single predicate BOTH the
+hostname check and the post-DNS socket check use. An address named in `ESC_SSRF_ALLOWED_HOSTS` is
+treated as public. Unset or empty, the guard is EXACTLY upstream's. Exact match on the address,
+never a range: a CIDR would quietly re-open the estate to anyone who can author a workflow.
+
+**Where the value is set.** `/root/twenty-esc/docker-compose.yml`, under `environment:` on BOTH
+`server` and `worker` — `ESC_SSRF_ALLOWED_HOSTS: 192.168.103.175`. The worker is the one that
+actually executes workflow steps; setting it on the server alone would look right and do nothing.
+
+**Rollback.** `/root/twenty-esc/docker-compose.yml.bak.2026-09-09` restores the previous image and
+drops the variable; `docker compose up -d server worker`. The official image is untouched.
+
+**Verify what is RUNNING** (an option-B patch lives only in the image, so an upgrade that rebuilds
+from a new upstream tag without the patch scripts produces a healthy container that has silently
+lost them):
+
+```bash
+CONTAINER=twenty-esc-server-1 ./scripts/verify-esc-image.sh
+```
+
+### The workflow that uses it (C4 "Refresh interest profile")
+
+Manual trigger, `availability: SINGLE_RECORD` on `person`; one `HTTP_REQUEST` step:
+
+```
+POST http://192.168.103.175:3100/interests/refresh/{{trigger.id}}
+header x-refresh-key: <INTERESTS_REFRESH_KEY from /root/twenty-ingest/.env>
+```
+
+**`{{trigger.id}}`, NOT `{{trigger.record.id}}`.** The launched record is stored directly as the
+trigger step's result, with its fields at the top level and no `record` wrapper
+(`workflow-run.workspace-service.ts`, `stepInfos.trigger.result`). The wrapped form silently
+resolves to the string `undefined` and the call still goes out — it fails at the far end, not here.
+
+Proven end to end 2026-09-08 23:08 UTC: clicked on a real customer record, profile rewritten,
+confirmed in the database rather than from the UI.
+
+**The step cannot be created or edited through the API.** `createWorkflowVersionStep` answers an API
+key with `Forbidden resource` and the REST route refuses too ("Updating workflowVersion steps
+directly is forbidden"). Both need a signed-in user, so this workflow is maintained in the builder.
