@@ -432,6 +432,36 @@ if [ "${SKIP_VERIFY:-}" = "1" ] || [ "${PANGOLIN_SKIP_VERIFY:-}" = "1" ]; then
   exit 0
 fi
 
+# ── AN ARCHIVE REF IS PRESERVATION, NOT A LANDING ───────────────────────────
+#
+# 🔴 WHY THIS EXEMPTION EXISTS, MEASURED 2026-09-14. Three Codex branches in
+# `claude-code-config` held work on NO remote ref at all — one of them 63 lines of a
+# watchdog the trunk has never seen — and every route out was shut at once:
+# `codex-worktree-reap.py` REFUSES to delete them (that would lose the commits),
+# `unmerged_push.py` would not publish them, and THIS HOOK refused the push because
+# 8-to-10-day-old code fails today's suite. Work that can be neither landed nor
+# deleted must still be allowed to LEAVE THE DISK, or the only outcome left is losing
+# it — which is the one thing no gate is trying to achieve.
+#
+# ⚠️ THIS IS NOT A SECOND BYPASS, AND THE NAMESPACE IS THE WHOLE DIFFERENCE.
+# `refs/archive/*` is not a branch: nothing merges it, no deploy reads it, a default
+# `git clone` does not even fetch it, and `git push origin main` can never be spelled
+# this way. The gate exists to keep unverified code off TRUNK, and an archive ref
+# cannot reach trunk by any path. `SKIP_VERIFY` stays the only way to land unverified
+# code on a BRANCH, and it stays loud and logged.
+#
+# EVERY ref in the push must be an archive ref. A push carrying one archive ref and
+# one branch is gated exactly as it was before — otherwise the exemption becomes a way
+# to smuggle a branch past the gate by pairing it with an archive ref.
+if [ -n "${PUSH_REFS:-}" ] && printf '%s\n' "$PUSH_REFS" \
+     | awk 'NF { total++; if ($3 ~ /^refs\/archive\//) arch++ } END { exit !(total && total == arch) }'; then
+  printf 'pre-push: every ref here is under refs/archive/ — PRESERVATION, not a landing.\n'
+  printf '          The gate is NOT run: an archive ref is not a branch and cannot reach trunk.\n'
+  printf '          Read it back with:  git fetch origin "refs/archive/*:refs/archive/*"\n'
+  _pp_record_intent
+  exit 0
+fi
+
 # ── NOTHING EMPTY REACHES THE REMOTE ────────────────────────────────────────
 #
 # Measured 2026-08-20, twice in one day: a commit that recorded NO FILES passed
@@ -534,6 +564,34 @@ else
   set -- ./verify.sh
 fi
 
+# ── ASK THE CLIENT TO SAY IT STARTED ─────────────────────────────────────────
+#
+# 126 and 127 are the shell's codes for "could not exec", but they are ALSO
+# ordinary codes for a suite whose first step is a missing binary — `bundler:
+# command not found: rubocop` exits 127, and the client relays it faithfully.
+# Read as the shell's, that turns every unprovisioned toolchain into a silent
+# re-run on the workstation: a rail downgrade nobody chose, certifying on a
+# different machine, and an error message naming the wrong one. Measured
+# 2026-08-30 on `chatwoot-app`, where the only line on screen blamed a node
+# version that is correct on the runner that was supposed to run it.
+#
+# THIS IS NOT THE GUESS THE COMMENT BELOW REFUSES. Nothing here inspects the
+# number and decides what it meant. The client is handed a path and writes to it
+# the moment it starts; the file's existence afterwards is a STATEMENT the client
+# made about itself, in the same family as the exit-3 branch further down. An
+# older client that does not know the variable writes nothing, and this hook then
+# behaves exactly as it did before — a rollout nobody has to wait for.
+GATE_RECEIPT=""
+GATE_RECEIPT_DIR=""
+unset CLAUDE_GATE_RECEIPT
+if [ -n "$GATE_RUN" ]; then
+  GATE_RECEIPT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pre-push-gate.XXXXXX" 2>/dev/null || true)"
+  if [ -n "$GATE_RECEIPT_DIR" ]; then
+    GATE_RECEIPT="$GATE_RECEIPT_DIR/client-started"
+    export CLAUDE_GATE_RECEIPT="$GATE_RECEIPT"
+  fi
+fi
+
 printf '\npre-push: running ./verify.sh (GitHub Actions cannot run for this org)\n'
 
 "$@"
@@ -562,14 +620,58 @@ GATE_RC=$?
 # "255 means could not connect" convention read a dead rail as a failing suite
 # and refused three pushes that should have fallen back.
 if [ -n "$GATE_RUN" ] && { [ "$GATE_RC" -eq 126 ] || [ "$GATE_RC" -eq 127 ]; }; then
-  printf '\npre-push: %s could not be executed (exit %s) — running the suite locally.\n' \
-    "$GATE_RUN" "$GATE_RC" >&2
-  ./verify.sh
-  GATE_RC=$?
+  if [ -n "$GATE_RECEIPT" ] && [ -e "$GATE_RECEIPT" ]; then
+    # THE CLIENT RAN. It said so before it did anything else, so this code is the
+    # SUITE's, relayed — a step of ./verify.sh whose program was not on the machine
+    # that ran it. Falling back here would re-run on a workstation a suite that was
+    # certified nowhere, so it is refused as the red it is, and the sentence points
+    # at the toolchain instead of at this client.
+    printf '\n'
+    printf 'pre-push: the SUITE exited %s — %s RAN it and said so.\n' \
+      "$GATE_RC" "$GATE_RUN" >&2
+    printf '    %s from a suite that ran is ITS OWN missing program, not a client\n' "$GATE_RC" >&2
+    printf '    that could not start. NOT re-run locally: a suite meant to be certified\n' >&2
+    printf '    on the runner must not be quietly certified on this workstation.\n' >&2
+    printf '    If it ran on the gate runner, the usual cause is a toolchain the runner\n' >&2
+    printf '    was never told to provision — give the repo a REPO-CONTRACT.toml.\n' >&2
+  else
+    printf '\npre-push: %s could not be executed (exit %s) — running the suite locally.\n' \
+      "$GATE_RUN" "$GATE_RC" >&2
+    ./verify.sh
+    GATE_RC=$?
+  fi
 fi
+if [ -n "$GATE_RECEIPT_DIR" ]; then rm -rf "$GATE_RECEIPT_DIR"; fi
 
 if [ "$GATE_RC" -eq 0 ]; then
   _pp_record_intent
+  # ── DID THIS PUSH ALREADY LOSE THE REF-LOCK RACE? ────────────────────────────────────
+  # The gate is green and git is about to send the pack against the remote oid it read
+  # BEFORE this hook started — `man githooks` shows the hook being handed the
+  # <remote-object-name>, and the server compare-and-swaps against exactly that. So the
+  # whole gate sits inside the push's CAS window, and if the remote moved meanwhile this
+  # push is already doomed: the remote will say `cannot lock ref` in a moment.
+  #
+  # Saying so HERE costs one ls-remote and turns a mystery into a sentence. It also WRITES
+  # THE EVENT DOWN, per ref — which is the measurement `gate-outcomes.jsonl` cannot make,
+  # because that record carries the CHECKOUT's branch and HEAD, not the ref being pushed.
+  # Two loss rates derived from it had to be retracted for exactly that reason.
+  #
+  # ⛔ IT NEVER CHANGES THE VERDICT. The push proceeds either way; git does the refusing,
+  # and a probe able to fail a green gate would be a new way to lose work. Subshell,
+  # scrubbed git location, `|| true` on every leg, stdin closed.
+  (
+    unset GIT_DIR GIT_COMMON_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX \
+          GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+    _pr_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+    [ -n "$_pr_root" ] || exit 0
+    _pr_probe="${CLAUDE_PUSH_RACE_PROBE:-$HOME/.claude/policy-runtime/bin/push_race_probe.py}"
+    # INERT WHERE THE POLICY RUNTIME IS NOT INSTALLED: a fresh clone pushes as before.
+    [ -f "$_pr_probe" ] || exit 0
+    command -v python3 >/dev/null 2>&1 || exit 0
+    python3 "$_pr_probe" --repo "$_pr_root" --phase after_gate </dev/null || true
+  ) || true
+
   printf '\npre-push: gates passed — pushing.\n'
   exit 0
 fi
@@ -609,4 +711,4 @@ printf 'pre-push: GATES FAILED — push refused.\n' >&2
 printf 'pre-push: fix the code. To override deliberately, saying why:\n' >&2
 printf '    SKIP_VERIFY=1 SKIP_VERIFY_REASON="why" git push\n' >&2
 exit 1
-# gate-template-revision: 2569e6b6
+# gate-template-revision: 9162b767
