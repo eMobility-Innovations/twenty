@@ -55,3 +55,6 @@ TRANSLATION_QA_REPORT.md
 .playwright-mcp/
 .playwright-cli/
 output/playwright/
+
+# Backups written by esc/esc-apply.sh when it overlays an upstream file.
+.esc-originals/
