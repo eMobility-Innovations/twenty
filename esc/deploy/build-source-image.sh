@@ -25,6 +25,15 @@
 #                       official image ships and what CT175 runs today — the frontend
 #                       then derives the API URL from window.location.
 #   --skip-apply        Do not run esc/esc-apply.sh (the tree is already overlaid).
+#   --memory <size>     Hard cap on the build container's memory, e.g. 9g. Default 9g.
+#                       THIS IS A GUARD ON THE HOST, NOT A TUNING KNOB. The frontend
+#                       step asks Node for an 8 GB heap, and every candidate build host
+#                       we have also runs something people depend on — CT140 runs
+#                       GitLab, which is the whole org's CI. Without a cap, a build that
+#                       wants more than the box has takes the host's OOM killer with it
+#                       and the thing that dies is whatever else was resident. With a
+#                       cap the BUILD fails instead, which is the outcome you want.
+#                       Pass 0 to disable, and mean it.
 
 set -euo pipefail
 
@@ -35,6 +44,7 @@ IMAGE_TAG=""
 APP_VERSION=""
 SERVER_BASE_URL=""
 RUN_APPLY=true
+MEMORY_CAP="9g"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -42,6 +52,7 @@ while [ $# -gt 0 ]; do
     --app-version)     APP_VERSION="$2"; shift 2 ;;
     --server-base-url) SERVER_BASE_URL="$2"; shift 2 ;;
     --skip-apply)      RUN_APPLY=false; shift ;;
+    --memory)          MEMORY_CAP="$2"; shift 2 ;;
     --help|-h)         sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -81,7 +92,14 @@ fi
 echo "==> docker build (target: twenty)"
 # BuildKit is not required by this Dockerfile and CT140 has no buildx plugin, so the
 # legacy builder is selected explicitly rather than left to a deprecation warning.
+MEMORY_ARGS=()
+if [ "${MEMORY_CAP}" != "0" ]; then
+  MEMORY_ARGS=(--memory "${MEMORY_CAP}" --memory-swap "${MEMORY_CAP}")
+  echo "    memory cap  : ${MEMORY_CAP} (the build dies before the host does)"
+fi
+
 DOCKER_BUILDKIT=0 docker build \
+  "${MEMORY_ARGS[@]}" \
   --target twenty \
   -f packages/twenty-docker/twenty/Dockerfile \
   --build-arg "APP_VERSION=${APP_VERSION}" \
