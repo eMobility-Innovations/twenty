@@ -1,0 +1,118 @@
+# THE REPO CONTRACT — what this repo is, what it does, and what proves it.
+#
+# Checked by `repo-contract-guard.py --check`. The fork has no GitHub Actions CI
+# (removed by operator decision; see README.md, "eMobility-Innovations local gate"
+# section); every push runs ./verify.sh through the tracked pre-push hook.
+#
+# Previous draft described test files as pinning complex mocking behaviours.
+# Reading twenty-front's setupTests.ts, twenty-server's setupTests.ts, and the
+# server guard tests (impersonate-permission-guard.spec.ts) shows they use straightforward
+# jest.fn() mocks — no property-based tests, no state-machine or coverage-driven suites.
+# A contract asserting what its tests do, wrongly, is worse than one that claims less.
+
+[repo]
+name         = "twenty"
+what_it_is   = "An open-source CRM monorepo (Nx workspace) — a self-hostable CRM platform with a React frontend, NestJS backend, PostgreSQL database, and tooling for building custom CRM apps as code."
+what_it_does = """
+Provides the building blocks of a custom CRM — objects, views, workflows, and agents —
+that technical teams can build, ship, and version like the rest of their stack. It is
+deployed via Docker Compose (Postgres + Redis + server + worker in a single image or
+split services) and is also offered as cloud-hosted workspaces at twenty.com.
+
+If it stopped running, the estate loses the CRM application itself — the object model,
+GraphQL API, background job processing (BullMQ), and frontend UI — and the only fallback
+is rebuilding the entire CRM from scratch. The deployment fork (this checkout) also loses
+its local gate (./verify.sh) that prevents GitHub Actions workflows from creeping back in
+after upstream merges.
+
+The removed upstream automation — 35 GitHub Actions workflows for linting, type checking,
+unit/integration/E2E tests, builds, API compatibility, Docker Compose, releases,
+translation sync, PR comments, bots, and preview environments — belongs to upstream's
+development process and is deliberately not run by this fork. See README.md,
+\"eMobility-Innovations local gate\" section, and docs/UPSTREAM-DIVERGENCE.md for the
+full divergence inventory.
+"""
+owner        = "patryk@escooterclinic.co.uk"
+status       = "active"
+
+[rules]
+must = [
+  "GitHub Actions workflows must remain absent — the gate runner checks for their re-appearance (check-no-workflows.sh)",
+  "Fork-scope: org-specific application paths that differ from upstream/main require targeted gates before being allowed in; the shared gate runner cannot measure the fork's diff (verify.sh, fork-scope skip block)",
+  "The pre-push hook arms ./verify.sh; every push runs it — no commit touches the trunk without passing the local gate (install-hooks.sh)",
+  "Tests run through Nx task definitions — test suites invoke @nx/jest:jest with per-package jest.config.mjs, not a hand-rolled runner (nx.json, test executor section)",
+  "Frontend uses Jest (not Vitest) for unit tests; Vitest is only used for storybook:test and within twenty-apps examples (twenty-front/jest.config.mjs, twenty-front/vitest.config.ts for storybook only)",
+  "Backend (twenty-server) uses Jest with @swc/jest transform, decorated TypeScript, and Lingui compilation (twenty-server/jest.config.mjs)",
+  "twenty-shared unit tests use Jest with jsdom environment (twenty-shared/jest.config.mjs)",
+  "E2E tests use Playwright and require a live Twenty instance (twenty-e2e-testing/package.json)",
+  "Zapier integration tests use Jest with zapier-platform-core (twenty-zapier/jest.config.mjs)",
+  "Oxlint rule tests use Vitest with RuleTester from oxlint/plugins-dev (twenty-oxlint-rules/vitest.config.mts, twenty-oxlint-rules/rules/enforce-module-boundaries.spec.ts)",
+  "Type checking uses tsgo (TypeScript Graph-optimized compiler) via nx typecheck target (nx.json, typecheck executor)",
+  "The build Dockerfile uses node:24-alpine as the base image (packages/twenty-docker/twenty/Dockerfile)",
+  "The dev docker-compose uses postgres:16 and redis:7 (packages/twenty-docker/docker-compose.dev.yml)",
+  "The fork's sync-upstream.sh handles removing upstream-brought GitHub Actions workflows during merges (sync-upstream.sh, check-no-workflows.sh)",
+]
+
+[tests]
+command = "npx nx test"
+suite   = "packages/"
+covers  = """
+Test-file counts below were measured on branch `emobility-unity` 2026-08-25 by counting
+tracked paths ending in .spec or .test with a ts/tsx/mts/js/mjs extension, per package.
+
+Unit test suites across six packages run Jest (twenty-front, twenty-server, twenty-shared,
+twenty-ui, twenty-zapier, create-twenty-app) or Vitest (twenty-oxlint-rules), gated through
+the Nx test executor (@nx/jest:jest) with per-package jest.config.mjs.
+
+twenty-server (528 test files): guards — impersonate-permission-guard.spec.ts pins that
+impersonation is blocked when the user lacks both the direct flag and the workspace
+IMPERSONATE setting; instance-command-generation.service.spec.ts pins that schema diffs
+produce migration files with correct up/down queries, version slugs, file/class naming,
+and SQL escaping. Other server suites exercise utility functions (is-snake-case-string,
+stream-to-buffer, is-work-email), ClickHouse service, and IMAP/SMTP/CalDAW APIs.
+
+twenty-front (802 test files): hook-level tests (useNavigateApp, useFirstMountState,
+usePageChangeEffectNavigateLocation) pin that navigation utilities trigger the correct
+React Router hooks and state transitions without mounting full components.
+
+twenty-shared (137 test files): utility tests (isNonEmptyArray, parseJson, deepMerge,
+uuidToBase36, formatToShortNumber) pin straightforward value transformations; logic-function
+tests (get-function-input-schema.test.ts) pin that TypeScript function signatures are parsed
+into typed schema objects including nested objects, enums, and arrays; metadata tests pin
+label-to-name computation and reserved-word suffixing.
+
+twenty-oxlint-rules (17 spec files): RuleTester tests pin that each lint rule correctly
+flags and accepts code examples — enforce-module-boundaries.spec.ts for example, confirms
+frontend→backend imports are rejected while frontend→shared are accepted.
+
+twenty-e2e-testing (8 spec files): Playwright tests (create-record, workflow-creation,
+workflow-run) exercise the full application stack — page navigation, form filling, GraphQL
+API verification — but most are currently fully commented-out (see workflow-visualizer.spec.ts,
+entire file commented out). create-record.spec.ts is the most complete active test, verifying
+CRUD round-trips.
+
+twenty-zapier (7 test files): authentication.test.ts pins that custom auth validates
+credentials against the Twenty API, rejects bad tokens with UNAUTHENTICATED errors, and
+handleQueryParams.test.ts pins query parameter handling.
+
+The suite asserts on CODE and stubs external runtimes (HTTP APIs, databases, auth providers)
+where possible, so it gives the same verdict on the gate runner as on a workstation. That
+property is what lets this repo be judged offsite.
+
+Note: twenty-server uses jest-environment-node and twenty-front uses jest-environment-jsdom;
+tests are not cross-compatible — a frontend test running in Node would fail on DOM APIs.
+"""
+coverage_floor = 70
+
+[runner]
+# WHAT THE GATE RUNNER MUST PROVIDE: nothing version-selected.
+#
+# This fork's `./verify.sh` runs `./check-no-workflows.sh` and the fork-scope check, and
+# nothing else. It deliberately does not reproduce upstream's monorepo CI — the operator's
+# ruling, 2026-08-25: *we pull from upstream and apply our overlay, so at the end only OUR
+# fork has to run.* `tests.command` above therefore describes the suite that proves the
+# CODE, which this gate does not execute; this field is about the GATE.
+#
+# An earlier draft declared `["typescript", "jest"]`. Neither is a toolchain — both are
+# libraries the vendored suite imports — and the guard refused them by name.
+toolchains = ["none"]

@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# sync-upstream.sh — merge upstream into this repo WITHOUT re-fighting the workflow deletion.
+#
+# TEMPLATE. Canonical copy: claude-code-policy/policy/gate-template/sync-upstream.sh.
+# Copy into a repo together with .sync-upstream.conf, which names the remote and branch.
+#
+# THE PROBLEM THIS SOLVES
+# -----------------------
+# This repo tracks an upstream codebase, and its .github/workflows were deleted (Actions cannot run
+# for this org — billing — so every one of them reported failure for an account reason and checked
+# nothing). Deleting files upstream still maintains is a base-file divergence, and it shows up on
+# every sync in two very different shapes:
+#
+#   LOUD   upstream MODIFIES a workflow we deleted  -> delete/modify conflict, git stops, a human
+#          has to type something. Annoying, but safe: nothing happens without a decision.
+#   SILENT upstream ADDS a workflow                 -> merges cleanly, no conflict, no review
+#          comment, invisible among a thousand other upstream files. The repo has CI again and
+#          nobody knows.
+#
+# The silent one is the reason this script exists, and the reason ./check-no-workflows.sh is a GATE
+# rather than a note in the README.
+#
+# WHAT IT DOES
+# ------------
+# Merges upstream, then applies exactly ONE deterministic policy: everything under
+# .github/workflows/ is removed, whether it arrived as a conflict or as a clean addition. That is
+# not a judgement call, so a script may make it.
+#
+# EVERY OTHER CONFLICT STOPS THE SCRIPT AND IS LEFT FOR A HUMAN. There is deliberately no
+# `-X ours` / `-X theirs` anywhere in here: those pick a side without reading, which loses one of
+# the two intentions in the conflict. Real code conflicts are what a person is for.
+#
+#   ./sync-upstream.sh          fetch, merge, drop workflows, commit if nothing else conflicts
+
+set -uo pipefail
+cd "$(dirname "$0")" || exit 1
+
+# Per-repo settings live beside the script so the script itself stays identical everywhere.
+#
+# THE ENVIRONMENT WINS OVER THE FILE. Sourcing the conf last would silently overwrite an explicit
+# `UPSTREAM_BRANCH=v1.6.0 ./sync-upstream.sh` with the conf's own value and merge a different ref
+# than the operator named — and the only trace is one line of output nobody reads twice. Syncing
+# onto a tag or a release branch instead of a red upstream HEAD is a normal, deliberate thing to
+# do, so it gets to override the file.
+_env_remote="${UPSTREAM_REMOTE:-}"
+_env_branch="${UPSTREAM_BRANCH:-}"
+_env_ref="${UPSTREAM_REF:-}"
+[ -f .sync-upstream.conf ] && . ./.sync-upstream.conf
+UPSTREAM_REMOTE="${_env_remote:-${UPSTREAM_REMOTE:-upstream}}"
+UPSTREAM_BRANCH="${_env_branch:-${UPSTREAM_BRANCH:-main}}"
+# UPSTREAM_REF names any ref directly — a tag, or anything not shaped like <remote>/<branch>.
+UPSTREAM_REF="${_env_ref:-${UPSTREAM_REF:-${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}}}"
+
+WF=".github/workflows"
+
+die() { printf 'sync-upstream: %s\n' "$*" >&2; exit 1; }
+
+git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository."
+
+# A merge on top of uncommitted work mixes someone else's in-flight edits into the merge commit.
+[ -z "$(git status --porcelain)" ] || die \
+  "working tree is dirty — commit or stash first, so the merge commit contains only the merge."
+
+git remote get-url "$UPSTREAM_REMOTE" >/dev/null 2>&1 || die \
+  "no '$UPSTREAM_REMOTE' remote. Add it:  git remote add $UPSTREAM_REMOTE <upstream-url>"
+
+printf 'sync-upstream: fetching %s...\n' "$UPSTREAM_REMOTE"
+git fetch --quiet --tags "$UPSTREAM_REMOTE" || die "fetch failed."
+
+REF="$UPSTREAM_REF"
+
+# A TAG is a ref, not a <remote>/<branch> pair, so `UPSTREAM_BRANCH=v1.6.0` composes a
+# "$UPSTREAM_REMOTE/v1.6.0" that cannot exist. Syncing onto a release tag instead of a moving HEAD
+# is the normal reason to override at all, so resolve the bare name rather than dead-ending on it.
+if ! git rev-parse --verify -q "$REF" >/dev/null && git rev-parse --verify -q "$UPSTREAM_BRANCH" >/dev/null; then
+  printf 'sync-upstream: %s is not a ref; using %s, which is.\n' "$REF" "$UPSTREAM_BRANCH"
+  REF="$UPSTREAM_BRANCH"
+fi
+
+git rev-parse --verify -q "$REF" >/dev/null || die "no such ref: $REF"
+
+# Say what is actually about to be merged, resolved to a commit — the ref name alone is what made
+# a conf-vs-environment mix-up survive a whole merge unnoticed.
+printf 'sync-upstream: target %s = %s\n' "$REF" "$(git rev-parse --short "$REF^{commit}")"
+
+if [ -z "$(git rev-list -1 HEAD.."$REF")" ]; then
+  echo "sync-upstream: already up to date with $REF — nothing to merge."
+  exit 0
+fi
+
+# What upstream is about to hand us under .github/workflows, recorded BEFORE the merge so it can be
+# reported even for files that merge in cleanly and would otherwise leave no trace.
+incoming="$(git ls-tree -r --name-only "$REF" -- "$WF" 2>/dev/null | sort)"
+
+printf 'sync-upstream: merging %s (no commit yet)...\n' "$REF"
+git merge --no-commit --no-ff "$REF" >/dev/null 2>&1
+merge_rc=$?
+
+# A merge can fail BEFORE it starts — unrelated histories, a refusal to overwrite an untracked
+# file. There is no merge in progress then, and the removal below would be deleting workflows from
+# an ordinary HEAD rather than resolving a merge. Distinguish the two by MERGE_HEAD, not by rc.
+if [ "$merge_rc" -ne 0 ] && ! git rev-parse --verify -q MERGE_HEAD >/dev/null; then
+  git merge --abort 2>/dev/null || true
+  die "merge of $REF could not start (unrelated histories, or an untracked file in the way).
+                Nothing was changed. Run 'git merge $REF' by hand to see git's own message."
+fi
+
+# ---------------------------------------------------------------------------
+# THE ONE AUTOMATIC RESOLUTION: workflows go. Conflicted or clean, staged or not.
+# `--ignore-unmatch` so a sync that brings none of them is not an error.
+# ---------------------------------------------------------------------------
+git rm -r -q --force --ignore-unmatch -- "$WF" >/dev/null 2>&1 || true
+rm -rf -- "$WF" 2>/dev/null || true
+
+# Anything still conflicted is real code. Stop; do not guess.
+unresolved="$(git diff --name-only --diff-filter=U 2>/dev/null)"
+if [ -n "$unresolved" ]; then
+  {
+    echo
+    echo "sync-upstream: the workflow removal was applied, but REAL conflicts remain:"
+    echo "$unresolved" | sed 's/^/    /'
+    echo
+    echo "  These are code, not policy — resolve them by reading both sides. Keep both"
+    echo "  intentions; do not reach for --ours or --theirs. Then:"
+    echo "      ./verify.sh && git commit"
+    echo
+    echo "  To abandon the whole sync:  git merge --abort"
+  } >&2
+  exit 1
+fi
+
+if [ -n "$incoming" ]; then
+  msg="chore: sync $REF (dropping upstream .github/workflows)
+
+Upstream carries workflows this org cannot run — GitHub Actions is blocked
+org-wide by a billing condition, so each one reports failure for an account
+reason and checks nothing. This repo's gate is ./verify.sh, enforced by
+.githooks/pre-push, and ./check-no-workflows.sh fails if they come back.
+
+Removed on this merge:
+$(echo "$incoming" | sed 's/^/  /')"
+else
+  msg="chore: sync $REF"
+fi
+
+# ---------------------------------------------------------------------------
+# RECORD THE SYNC POINT, IN A TRACKED FILE, IN THIS SAME COMMIT.
+#
+# A fork-scope gate asks how this fork differs from upstream, and the honest way to ask
+# it is `git diff <sync point>...HEAD`. Everywhere a human runs it, `upstream/main`
+# names that point. On the SHARED GATE RUNNER it names nothing: measured on ct211
+# 2026-08-25, the payload carries NO GIT REMOTES AT ALL and the runner holds no
+# credential to add one — deliberately, because that is what keeps the runner a compute
+# surface rather than an access surface. So the check that matters most on the way to
+# origin is precisely the one that cannot run there, and it degrades to a SKIP.
+#
+# The sync point does not need a remote to be named. After a sync it is an ancestor of
+# HEAD, in this repository's own history, reachable by SHA alone. Writing that SHA down
+# is what makes the question answerable inside the payload, on any machine.
+#
+# PROVEN EQUIVALENT, not assumed. On `twenty` 2026-08-25:
+#     git diff --name-only upstream/main...HEAD   ->  44 paths
+#     git diff --name-only <recorded>..HEAD       ->  the same 44 paths, byte for byte
+# because three-dot diff is defined against the merge base, which is exactly what is
+# recorded here.
+SYNC_POINT="$(git rev-parse "$REF^{commit}")"
+{
+  echo "# The upstream commit this fork is synced onto. Written by sync-upstream.sh."
+  echo "#"
+  echo "# TRACKED DELIBERATELY, and it is not documentation. The fork-scope gate reads it"
+  echo "# so that \"how does this fork differ from upstream\" can be answered with no remote"
+  echo "# configured — which is the state of the shared gate runner's payload, by design."
+  echo "# Do not hand-edit: it is rewritten by every sync, and a wrong value here makes the"
+  echo "# gate compare against a commit nobody merged."
+  echo "ref = $REF"
+  echo "commit = $SYNC_POINT"
+  echo "synced = $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > .upstream-sync
+git add .upstream-sync
+
+git commit --quiet --no-edit -m "$msg" || die "merge commit failed."
+
+echo
+echo "sync-upstream: merged $REF."
+if [ -n "$incoming" ]; then
+  echo "sync-upstream: dropped $(echo "$incoming" | grep -c .) upstream workflow file(s):"
+  echo "$incoming" | sed 's/^/    /'
+fi
+echo "sync-upstream: sync point recorded in .upstream-sync ($(git rev-parse --short "$SYNC_POINT"))."
+echo "sync-upstream: run ./verify.sh before pushing (the pre-push hook will anyway)."
