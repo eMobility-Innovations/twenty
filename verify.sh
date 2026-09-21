@@ -8,6 +8,51 @@ cd "$(dirname "$0")"
 echo "gate: GitHub Actions workflows must remain absent"
 ./check-no-workflows.sh
 
+echo "gate: the ESC overlay must still line up with upstream"
+
+# ---------------------------------------------------------------------------
+# `esc/overlay/<upstream-relative-path>` holds PATCHED COPIES of upstream files at
+# their exact upstream paths; `esc/esc-apply.sh` copies them over the working tree
+# before an image is built. That design has one failure mode, and it is silent:
+# when an upstream sync MOVES, RENAMES or DELETES a patched file, the overlay copy
+# still exists and still applies — to a path nothing reads any more. `esc-apply.sh`
+# does not refuse in that case, it CREATES the file (it cannot tell a rename from a
+# new file), so the build succeeds and the patch is simply not in the product.
+#
+# For the SSO patch that means the Enterprise gate comes back and Keycloak login
+# stops working, discovered by a person who cannot sign in. This check is what
+# turns that into a refused push.
+#
+# It is a pure path-existence test, so it runs anywhere a checkout does — no
+# dependencies, no remotes, no database. There is nothing for it to skip on.
+if [ -d esc/overlay ]; then
+  bash -n esc/esc-apply.sh
+
+  overlay_orphans=""
+  while IFS= read -r overlay_file; do
+    target="${overlay_file#esc/overlay/}"
+    if [ ! -f "$target" ]; then
+      overlay_orphans="${overlay_orphans}${target}
+"
+    fi
+  done < <(find esc/overlay -type f)
+
+  if [ -n "$overlay_orphans" ]; then
+    {
+      echo "esc-overlay: these overlay files no longer have an upstream file to patch:"
+      printf '%s' "$overlay_orphans" | sed 's/^/    /'
+      echo
+      echo "  Upstream moved, renamed or deleted them. esc-apply.sh will NOT refuse —"
+      echo "  it will create the path and the patch will silently not be in the build."
+      echo "  Re-point the overlay at the new path, and record it in"
+      echo "  scripts/PATCH_MANIFEST.md, before this is allowed to build."
+    } >&2
+    exit 1
+  fi
+
+  echo "esc-overlay: every overlay file still has its upstream target — good."
+fi
+
 echo "gate: the ESC onboarding wizard must carry its own checks"
 
 # ---------------------------------------------------------------------------
@@ -168,6 +213,19 @@ if [ -n "${DIFF_RANGE:-}" ]; then
 # allowlisted here ONLY because the esc-onboarding gate above runs typecheck and
 # the wizard's suite over them on every push that can run them.
 #
+# `esc/**` and the `scripts/` files that serve it (PATCH_MANIFEST.md,
+# esc-modified-files.txt, verify-esc-*.sh) are allowlisted because they ARE the
+# fork's deployment policy — the overlay that turns an upstream release into the
+# image CT175 runs, plus its manifest and its verifier. They are covered by the
+# esc-overlay gate above, which refuses a push the moment an overlay file loses
+# the upstream file it patches. Added 2026-09-21, when the overlay was proposed
+# for the trunk so that a source build could carry the SSO and SSRF patches.
+#
+# NOTE that esc/overlay/ does contain a COPY of an application file
+# (enterprise-plan.service.ts). That is the point of an overlay, and it is why the
+# existence check above is not optional: the copy is the only thing keeping the
+# patch alive across an upstream sync.
+#
 # `docs/handovers/*.md` is allowlisted for the same reason `docs/UPSTREAM-DIVERGENCE.md`
 # already was: it is a record of the fork's own decisions, not application code, and the
 # org requires one per session. Added 2026-09-21, when the first handover tripped this.
@@ -190,7 +248,7 @@ unexpected="$({
   git diff --name-only
   git diff --cached --name-only
   git ls-files --others --exclude-standard
-} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts)$' || true)"
+} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts)$' || true)"
 
 if [ -n "$unexpected" ]; then
   {

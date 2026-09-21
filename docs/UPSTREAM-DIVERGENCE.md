@@ -55,6 +55,20 @@ git log --grep="dropping upstream .github/workflows"
 Features this fork adds that upstream does not have. Each keeps its code in one directory and
 records here every upstream file it edits, so an upstream merge has a short conflict list.
 
+### The `esc/` overlay
+
+The SSO enterprise bypass and the SSRF allowlist. Unlike the wizard, these MODIFY upstream files,
+so they are kept as patched copies at their upstream paths under `esc/overlay/`, applied to a
+checkout by `esc/esc-apply.sh` before an image is built. `scripts/PATCH_MANIFEST.md` documents
+each patch and how to re-point it when upstream moves the code.
+
+Landed on the trunk 2026-09-21. Until then it lived only on unmerged branches while the patched
+image ran in production — the image CT175 runs was not reproducible from anything on the trunk.
+
+`verify.sh`'s `esc-overlay` gate refuses a push the moment an overlay file loses the upstream file
+it patches, which is the one way this design fails silently: `esc-apply.sh` cannot tell a rename
+from a new file, so it would create the path and the patch would simply not be in the build.
+
 ### ESC self-onboarding wizard
 
 Redmine [#19873](https://redmine.fiszu.com/issues/19873); documented in
