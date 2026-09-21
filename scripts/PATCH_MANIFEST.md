@@ -96,6 +96,53 @@ after `esc-apply.sh` and after every upstream upgrade.
 
 ---
 
+## Category 2: SSRF allowlist (`ESC_SSRF_ALLOWED_HOSTS`)
+
+### Why this patch exists
+
+Twenty's workflow `HTTP_REQUEST` action refuses any host that resolves to a private address —
+*"Request to internal IP address 192.168.103.175 is not allowed."* It is a deliberate anti-SSRF
+control, it fails closed, and it re-checks **after** DNS, so no hostname gets around it. Upstream
+exposes no allowlist.
+
+We need exactly one internal endpoint reachable from a workflow: the `twenty-ingest` service on
+CT175, which rebuilds one customer's interest profile (C4, Redmine #14830). The alternative was
+publishing that endpoint on the internet, which is the larger exposure.
+
+### The patch (single file, single predicate)
+
+`packages/twenty-server/src/engine/core-modules/secure-http-client/utils/is-private-ip.util.ts`
+
+A short-circuit at the top of `isPrivateIp`, the single predicate **both** call sites use (the
+hostname check and the post-DNS socket check). An address named in `ESC_SSRF_ALLOWED_HOSTS` is
+treated as public; everything else is untouched.
+
+Two properties are part of the contract, not details:
+
+- **Fails closed.** With the variable unset or empty, behaviour is exactly upstream's.
+- **Exact match on the address.** Never a range, never a prefix — a CIDR here would quietly
+  re-open the whole estate to workflow-driven requests.
+
+### History, and why there are two copies of this patch
+
+It was written first as a **compiled** patch, `esc/deploy/patch-ssrf-allowlist.cjs`, applied to
+the official image by `esc/deploy/Dockerfile.option-b` (twenty#15, deployed 2026-09-09). That is
+what CT175 runs today.
+
+The **source** overlay was added 2026-09-21, when CT175 was moved to a source build so the CRM
+could carry a new backend module. Until then the overlay held only the Enterprise patch, so a
+source build would have shipped without the allowlist — and that failure is quiet: one workflow
+stops working and nothing else looks wrong.
+
+Keep both in step. If you change one, change the other, or a rollback to the compiled-patch image
+behaves differently from the thing you tested.
+
+### Verification
+
+- Source tree: `scripts/verify-esc-features.sh`, section 2.
+- Built image: `scripts/verify-esc-image.sh`, which greps the compiled `dist/`.
+- Live: a workflow step calling the allowlisted host must succeed. Nothing short of that proves it.
+
 ## Licensing / legal (AGPLv3)
 
 - Twenty is **AGPLv3**. Modifying it and self-hosting is permitted; AGPL §13 only
