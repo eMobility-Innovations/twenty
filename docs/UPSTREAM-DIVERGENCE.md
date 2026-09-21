@@ -49,3 +49,20 @@ available with:
 ```sh
 git log --grep="dropping upstream .github/workflows"
 ```
+
+## Fork-only features
+
+Features this fork adds that upstream does not have. Each keeps its code in one directory and
+records here every upstream file it edits, so an upstream merge has a short conflict list.
+
+### ESC self-onboarding wizard
+
+Redmine [#19873](https://redmine.fiszu.com/issues/19873); documented in
+[`esc-onboarding-wizard.md`](./esc-onboarding-wizard.md). Off by default behind the
+`IS_ESC_ONBOARDING_WIZARD_ENABLED` workspace feature flag.
+
+Upstream files edited:
+
+- `packages/twenty-shared/src/types/FeatureFlagKey.ts` — one enum member
+- `packages/twenty-server/src/engine/core-modules/core-engine.module.ts` — one import, one list entry
+- `packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager.spec.ts` — one line; its `featureFlagsMap` literal is typed `Record<FeatureFlagKey, boolean>`, so adding any flag forces it
