@@ -1,0 +1,3 @@
+# ESC-modified upstream files (overlaid by esc/esc-apply.sh).
+# One upstream-relative path per line. See scripts/PATCH_MANIFEST.md for details.
+packages/twenty-server/src/engine/core-modules/enterprise/services/enterprise-plan.service.ts
