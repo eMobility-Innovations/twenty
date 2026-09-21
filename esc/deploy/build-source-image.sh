@@ -117,7 +117,26 @@ DIST=/app/packages/twenty-server/dist
 FAIL=0
 
 check_in_image() { # description, path, needle
-  if docker cp "${CID}:$2" - 2>/dev/null | tar -xO 2>/dev/null | grep -q "$3"; then
+  # The file is read WHOLE into a variable before it is searched, and that is not
+  # style. `docker cp … | tar -xO | grep -q` looks obvious and is wrong under
+  # `set -o pipefail`: grep -q exits the moment it matches, tar gets SIGPIPE, and
+  # pipefail hands the pipeline that non-zero status. The check then reports FAIL on
+  # an image that HAS the feature — and it only does so when the needle appears EARLY
+  # in a LARGE file, so it looks like a real finding rather than a bug. Measured
+  # 2026-09-21: this reported "FAIL enterprise gate bypassed" on an image whose
+  # compiled enterprise-plan.service.js contains `return true;` three times.
+  #
+  # A false NEGATIVE on a deploy check is the expensive direction. Read it all.
+  local extracted
+  extracted="$(docker cp "${CID}:$2" - 2>/dev/null | tar -xO 2>/dev/null || true)"
+
+  if [ -z "${extracted}" ]; then
+    echo "  FAIL $1 (file not present in the image: $2)"
+    FAIL=$((FAIL + 1))
+    return
+  fi
+
+  if printf '%s' "${extracted}" | grep -q "$3"; then
     echo "  PASS $1"
   else
     echo "  FAIL $1"
