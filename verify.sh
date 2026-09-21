@@ -8,6 +8,40 @@ cd "$(dirname "$0")"
 echo "gate: GitHub Actions workflows must remain absent"
 ./check-no-workflows.sh
 
+echo "gate: the ESC onboarding wizard must carry its own checks"
+
+# ---------------------------------------------------------------------------
+# THE FORK-SCOPE CHECK BELOW SAYS, IN ITS OWN WORDS: "Add targeted gates for these
+# paths before they are allowed into the fork." This is that gate, for the first
+# application-code delta this fork has carried — the self-onboarding wizard
+# (Redmine #19873, docs/esc-onboarding-wizard.md).
+#
+# It runs the wizard's own suite, which includes the three tests that hold the
+# operator's condition for this work: the feature flag must stay absent from
+# DEFAULT_FEATURE_FLAGS, from PUBLIC_FEATURE_FLAGS and from the dev seeder, so it
+# reads false for every workspace until somebody turns it on deliberately. All
+# three were mutation-tested both ways on 2026-09-21 — each one fails when its
+# guard is removed.
+#
+# It also typechecks the server, because adding a FeatureFlagKey member breaks an
+# upstream spec whose featureFlagsMap literal is typed Record<FeatureFlagKey,
+# boolean>. Nothing but a typecheck catches that.
+#
+# SKIPS LOUDLY, BY NAME, WHEN IT CANNOT RUN — the same discriminator the fork-scope
+# check uses below. The gate payload carries no node_modules, so the suite is not
+# installed there and no amount of trying makes it answerable. A skip nobody can
+# see is how a gate becomes a green-looking absence of one.
+if [ -d node_modules ]; then
+  npx nx typecheck twenty-server
+  (cd packages/twenty-server && npx jest esc-onboarding --config=jest.config.mjs)
+  echo "esc-onboarding: typecheck and the wizard suite passed."
+else
+  echo "esc-onboarding: SKIPPED — node_modules is absent in this checkout, so the" >&2
+  echo "esc-onboarding:   suite cannot be run by anyone from here. THIS RUN DID NOT" >&2
+  echo "esc-onboarding:   CHECK THE WIZARD. Run ./verify.sh on a clone with" >&2
+  echo "esc-onboarding:   dependencies installed (yarn install) to prove it." >&2
+fi
+
 echo "gate: org-specific application changes must have targeted checks"
 
 # ---------------------------------------------------------------------------
@@ -124,6 +158,25 @@ if [ -n "${DIFF_RANGE:-}" ]; then
 # compliant gate-policy change as an application change and refused it. The predicate had
 # gone stale against what it claims to guard; the fix is the predicate, not the change.
 #
+# ---------------------------------------------------------------------------
+# 🔧 WIDENED 2026-09-21, and the reason matters: THE SENTENCE BELOW ABOUT THIS FORK
+# HAVING "no application-code delta" STOPPED BEING TRUE ON THAT DATE. The
+# self-onboarding wizard (Redmine #19873) is the first application code this org
+# writes into the fork, by operator direction, so the predicate had gone stale
+# against what it guards. Per the gate's own instruction — "Add targeted gates for
+# these paths before they are allowed into the fork" — the wizard's paths are
+# allowlisted here ONLY because the esc-onboarding gate above runs typecheck and
+# the wizard's suite over them on every push that can run them.
+#
+# Three of the allowlisted paths are upstream files, not fork files:
+# FeatureFlagKey.ts, core-engine.module.ts and workspace-entity-manager.spec.ts.
+# Each carries exactly one line of ours, and each is forced: a new flag member, a
+# module registration, and a typed featureFlagsMap literal that will not compile
+# without the new key. They are listed in docs/UPSTREAM-DIVERGENCE.md so an
+# upstream merge has a short conflict list. Allowlisting them does mean an
+# UNRELATED edit to one of those three files no longer trips this check — the
+# typecheck above is what covers them instead.
+# ---------------------------------------------------------------------------
 # Measured across all 30 gated repos on 2026-08-25, this bites exactly three of them: the
 # 22 others with a checkout carry no path allowlist at all, and the three that do
 # (docuseal-full, chatwoot, twenty) are all vendored upstream forks. All three were widened
@@ -133,7 +186,7 @@ unexpected="$({
   git diff --name-only
   git diff --cached --name-only
   git ls-files --others --exclude-standard
-} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*)$' || true)"
+} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts)$' || true)"
 
 if [ -n "$unexpected" ]; then
   {

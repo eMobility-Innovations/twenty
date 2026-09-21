@@ -76,6 +76,7 @@ import { DashboardModule } from 'src/modules/dashboard/dashboard.module';
 import { SendEmailModule } from 'src/modules/messaging/message-outbound-manager/send-email.module';
 import { AuditModule } from './audit/audit.module';
 import { ClientConfigModule } from './client-config/client-config.module';
+import { EscOnboardingModule } from 'src/engine/core-modules/esc-onboarding/esc-onboarding.module';
 import { EventLogsModule } from './event-logs/event-logs.module';
 import { FileModule } from './file/file.module';
 
@@ -164,6 +165,7 @@ import { FileModule } from './file/file.module';
     TrashCleanupModule,
     DashboardModule,
     EventLogsModule,
+    EscOnboardingModule,
   ],
   providers: [
     {
