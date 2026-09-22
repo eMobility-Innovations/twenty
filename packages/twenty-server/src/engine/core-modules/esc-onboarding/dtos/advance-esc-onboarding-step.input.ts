@@ -1,6 +1,6 @@
 import { Field, InputType } from '@nestjs/graphql';
 
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 @InputType()
 export class AdvanceEscOnboardingStepInput {
@@ -12,7 +12,12 @@ export class AdvanceEscOnboardingStepInput {
   @MaxLength(128)
   completedStep: string;
 
+  // The step to resume on. Absent on the LAST step of a script, which is why
+  // @IsOptional() is load-bearing: class-validator runs @IsString() against
+  // `undefined` without it, so the final advance of every wizard run would be
+  // rejected with a validation error.
   @Field(() => String, { nullable: true })
+  @IsOptional()
   @IsString()
   @MaxLength(128)
   nextStep?: string;

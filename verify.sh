@@ -229,6 +229,10 @@ if [ -n "${DIFF_RANGE:-}" ]; then
 # existence check above is not optional: the copy is the only thing keeping the
 # patch alive across an upstream sync.
 #
+# `docs/preflight/*.md` joins them 2026-09-22: the record of a 116-agent read-only preflight
+# over this fork's delta, written after a cutover took the CRM down for 16h41m. It is a record
+# of decisions and measurements, not application code.
+#
 # `docs/handovers/*.md` is allowlisted for the same reason `docs/UPSTREAM-DIVERGENCE.md`
 # already was: it is a record of the fork's own decisions, not application code, and the
 # org requires one per session. Added 2026-09-21, when the first handover tripped this.
@@ -251,7 +255,7 @@ unexpected="$({
   git diff --name-only
   git diff --cached --name-only
   git ls-files --others --exclude-standard
-} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|\.gitignore|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts)$' || true)"
+} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|docs/preflight/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|\.gitignore|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts)$' || true)"
 
 if [ -n "$unexpected" ]; then
   {
