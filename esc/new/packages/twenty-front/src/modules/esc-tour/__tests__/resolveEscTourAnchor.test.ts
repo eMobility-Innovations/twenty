@@ -99,4 +99,74 @@ describe('selectShowableEscTourSteps', () => {
     expect(showableSteps.map((step) => step.id)).toEqual(['welcome', 'people']);
     expect(missingStepIds).toEqual(['gone']);
   });
+
+  it('keeps the script order of the steps it does show', () => {
+    const container = buildDocument(
+      '<a href="/objects/b">b</a><a href="/objects/a">a</a>',
+    );
+    const steps: EscTourStep[] = [
+      { id: 'a', title: 'T', body: 'B', anchor: 'a[href="/objects/a"]' },
+      { id: 'b', title: 'T', body: 'B', anchor: 'a[href="/objects/b"]' },
+    ];
+
+    const { showableSteps } = selectShowableEscTourSteps(steps, container);
+
+    // Script order, not the order the anchors happen to sit in the DOM.
+    expect(showableSteps.map((step) => step.id)).toEqual(['a', 'b']);
+  });
+
+  it('reports nothing missing for a script of unanchored steps', () => {
+    const { showableSteps, missingStepIds } = selectShowableEscTourSteps(
+      [
+        { id: 'welcome', title: 'T', body: 'B' },
+        { id: 'done', title: 'T', body: 'B' },
+      ],
+      buildDocument(''),
+    );
+
+    expect(showableSteps).toHaveLength(2);
+    expect(missingStepIds).toEqual([]);
+  });
+
+  it('survives an empty script', () => {
+    const { showableSteps, missingStepIds } = selectShowableEscTourSteps(
+      [],
+      buildDocument(''),
+    );
+
+    expect(showableSteps).toEqual([]);
+    expect(missingStepIds).toEqual([]);
+  });
+
+  it('takes the first match when a selector matches more than one element', () => {
+    const container = buildDocument(
+      '<a href="/objects/people" id="first">p</a><a href="/objects/people" id="second">p</a>',
+    );
+
+    const resolved = resolveEscTourAnchor(
+      { id: 'people', title: 'T', body: 'B', anchor: 'a[href="/objects/people"]' },
+      container,
+    );
+
+    expect(resolved.element?.id).toBe('first');
+  });
+
+  it('resolves to the anchor itself when it is its own nearest matching ancestor', () => {
+    const container = buildDocument('<nav><a href="/objects/people">p</a></nav>');
+
+    const resolved = resolveEscTourAnchor(
+      {
+        id: 'sidebar',
+        title: 'T',
+        body: 'B',
+        anchor: 'nav',
+        anchorAncestor: 'nav',
+      },
+      container,
+    );
+
+    // `closest` matches the element itself, which is the behaviour a step relies on when it
+    // names a container directly.
+    expect(resolved.element?.tagName).toBe('NAV');
+  });
 });

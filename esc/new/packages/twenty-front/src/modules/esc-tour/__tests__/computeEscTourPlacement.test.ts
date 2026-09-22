@@ -54,6 +54,49 @@ describe('computeEscTourPlacement', () => {
     expect(nearBottom.top + 200).toBeLessThanOrEqual(900 - 16 + 1);
   });
 
+  it('flips to the left of the anchor when neither right nor below has room', () => {
+    const placement = computeEscTourPlacement({
+      anchorRect: { top: 600, left: 1000, width: 400, height: 40 },
+      ...POPOVER,
+      ...VIEWPORT,
+    });
+
+    expect(placement.side).toBe('left');
+    expect(placement.left).toBe(1000 - 12 - 320);
+  });
+
+  it('falls back to above the anchor when no side has room', () => {
+    const placement = computeEscTourPlacement({
+      anchorRect: { top: 700, left: 0, width: 1440, height: 180 },
+      ...POPOVER,
+      ...VIEWPORT,
+    });
+
+    expect(placement.side).toBe('top');
+  });
+
+  it('centres the popover on the anchor when it sits below it', () => {
+    const placement = computeEscTourPlacement({
+      anchorRect: { top: 100, left: 1100, width: 300, height: 40 },
+      ...POPOVER,
+      ...VIEWPORT,
+    });
+
+    // 1100 + 150 - 160 = 1090, which fits, so nothing should have been clamped.
+    expect(placement.left).toBe(1090);
+  });
+
+  it('vertically centres the popover against the anchor when it sits beside it', () => {
+    const placement = computeEscTourPlacement({
+      anchorRect: { top: 400, left: 16, width: 200, height: 40 },
+      ...POPOVER,
+      ...VIEWPORT,
+    });
+
+    // 400 + 20 - 100 = 320.
+    expect(placement.top).toBe(320);
+  });
+
   it('keeps a popover wider than the viewport on screen rather than off its left edge', () => {
     const placement = computeEscTourPlacement({
       anchorRect: { top: 10, left: 0, width: 10, height: 10 },

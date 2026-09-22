@@ -231,6 +231,13 @@ Four properties are part of the contract, not details:
   quietly shorter, which looks exactly like a tour that is working.
 - **The tour changes no data.** It reads the DOM and paints over it. There is no mutation, no
   API call, and no record of who has taken it — by the operator's decision above.
+- **It owns its CSS instead of using linaria**, which is what the rest of twenty-front uses.
+  Linaria is a build-time transform: `styled.div` only works because a bundler plugin has
+  already replaced it, and twenty-front's jest config carries no linaria transform — so a
+  component built from `@linaria/react` cannot be rendered in a unit test at all. That would
+  leave the overlay, the part a person actually sees, permanently untestable. The overlay
+  lives in a portal on `document.body` and shares no tokens or stacking context with the
+  product's surfaces, so it loses nothing by injecting its own stylesheet once, by id.
 
 ### Delivery: a FRONT-ONLY image layer
 
