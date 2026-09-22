@@ -1,5 +1,10 @@
 import { useEffect } from 'react';
-import { IconRoute } from 'twenty-ui/display';
+// IconMap, not IconRoute: twenty-ui/display re-exports a HAND-PICKED subset of Tabler,
+// and IconRoute is in the internal AllIcons registry but not in that subset. The bundle
+// build is what says so, with "not exported by twenty-ui/dist/display.mjs". Check
+// packages/twenty-ui/src/display/index.ts before reaching for an icon name; being in
+// AllIcons.ts is not the same as being exported.
+import { IconMap } from 'twenty-ui/display';
 
 import { EscTourOverlay } from '@/esc-tour/components/EscTourOverlay';
 import { useEscTour } from '@/esc-tour/hooks/useEscTour';
@@ -32,7 +37,7 @@ export const EscTourNavigationDrawerItem = () => {
     <>
       <NavigationDrawerItem
         label="Tour"
-        Icon={IconRoute}
+        Icon={IconMap}
         onClick={tour.open}
       />
       <EscTourOverlay tour={tour} />
