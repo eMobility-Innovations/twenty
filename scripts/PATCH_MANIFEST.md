@@ -180,6 +180,101 @@ behaves differently from the thing you tested.
 - Built image: `scripts/verify-esc-image.sh`, which greps the compiled `dist/`.
 - Live: a workflow step calling the allowlisted host must succeed. Nothing short of that proves it.
 
+## Category 3: The guided tour ("Tour" in the sidebar)
+
+Redmine [#19873](https://redmine.fiszu.com/issues/19873). Added 2026-09-22 after the operator
+replaced the stored-state onboarding wizard with a button anyone can press at any time:
+
+> "we can skip the database table and the flags of who is onboarded and who's not and we can
+> easily do a button in the sidebar of Twenty CRM and when people click on it, it walks them
+> through the onboarding"
+
+That decision deleted the largest obstacle in front of the next cutover along with the
+feature it belonged to. The wizard needed `core."escOnboarding"`, and the image entrypoint
+runs TypeORM migrations **only when the `core` schema is absent**, which on CT175 it is not —
+so the table would have shipped dead with no boot-time symptom. With no table there is
+nothing for the migration path to fail to run.
+
+### Why this patch exists
+
+There is no upstream extension point for a sidebar entry. Twenty's navigation drawer renders a
+fixed set of items in `NavigationDrawerOtherSection`, and nothing reads a registry, a plugin
+list or a config key to add one. So one upstream file is overlaid — and exactly one.
+
+### The patch (single file, single element)
+
+`packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx`
+
+One import and one element, placed first in the "Other" section so somebody who has never
+seen the product finds it without being told where to look. The diff against upstream is two
+hunks and touches nothing else in the file.
+
+Everything the tour actually is lives in ESC-owned code that upstream has never seen, added
+by `esc/new/` rather than overlaid:
+
+`packages/twenty-front/src/modules/esc-tour/` — the controller hook, the spotlight/popover
+overlay, the anchor resolver, the placement maths and the script.
+
+Four properties are part of the contract, not details:
+
+- **No new npm dependency.** A tour library (driver.js and friends) would mean a permanent
+  `package.json` and `yarn.lock` divergence to reconcile on every upstream sync, and neither
+  file is allowlisted by `verify.sh`'s fork-scope check. The overlay is only survivable
+  because it is small.
+- **Anchors are ROUTES, never class names.** A step points at `a[href="/objects/people"]`. A
+  route is part of the product; a linaria hash is an artefact of the build and changes
+  without anybody deciding that it should. `escTourSteps.test.ts` fails if an anchor ever
+  starts with a class selector.
+- **A missing anchor skips its step, and says so.** `selectShowableEscTourSteps` resolves the
+  script once when the tour opens, drops the steps whose target is not on the page, and
+  returns their ids, which are logged by name. Without this a renamed route makes the tour
+  quietly shorter, which looks exactly like a tour that is working.
+- **The tour changes no data.** It reads the DOM and paints over it. There is no mutation, no
+  API call, and no record of who has taken it — by the operator's decision above.
+
+### Delivery: a FRONT-ONLY image layer
+
+`esc/deploy/Dockerfile.front-layer` + `esc/deploy/build-front-layer.sh`.
+
+The frontend is rebuilt from this checkout with the overlay applied, and laid over an
+existing ESC image as a single `COPY` into `/app/packages/twenty-server/dist/front`. **The
+server binary is not recompiled**, so the Nest dependency-injection failure that took the CRM
+down for 16h41m on 2026-09-21 cannot be reintroduced by this image, and the two compiled
+server patches above are inherited from the base rather than re-applied.
+
+Two facts make it safe, both measured rather than assumed:
+
+- `packages/twenty-front` is **byte-identical** between upstream `v2.0.0` and this fork's
+  trunk (`git diff v2.0.0..HEAD -- packages/twenty-front` is empty), so the rebuilt bundle is
+  the one production already serves, plus the tour.
+- The server serves the front as plain static files through NestJS `ServeStaticModule` with
+  `rootPath` `dist/front`. No asset manifest, no integrity check, no CSP pinning script
+  hashes — replacing the directory as one unit is the whole operation.
+
+`REACT_APP_SERVER_BASE_URL` is compiled into the bundle by vite. A bundle built with the
+wrong value points the browser at the wrong API host and nothing in the image says so, which
+is why `build-front-layer.sh` refuses to run without it.
+
+`BASE_IMAGE` must be an **ESC** image. A layer built over a bare `twentycrm/twenty:v2.0.0`
+would silently lose both server patches; `scripts/verify-esc-image.sh` is the check that
+catches it, and step 3 of the deploy runs it.
+
+### Verification
+
+```bash
+# after building, against the image
+./scripts/verify-esc-tour.sh --image twenty-esc-sso:v2.0.0-tour1
+
+# after deploying, against what is running
+./scripts/verify-esc-tour.sh --container twenty-esc-server-1
+CONTAINER=twenty-esc-server-1 ./scripts/verify-esc-image.sh
+```
+
+`verify-esc-tour.sh` proves the tour is PRESENT in the served bundle and that `index.html`
+and its hashed assets came from the same build. **It cannot prove the tour RUNS**, and
+nothing that greps a bundle can. A person clicking Tour in a browser is the proof, and it is
+a numbered step of the deploy in `esc/deploy/DEPLOY.md`.
+
 ## Licensing / legal (AGPLv3)
 
 - Twenty is **AGPLv3**. Modifying it and self-hosting is permitted; AGPL §13 only

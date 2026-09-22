@@ -253,3 +253,105 @@ exists and says loudly, by name, that the image was not booted.
 It said the build host's checkout is at `/root/twenty-esc-src` on CT140. **There is no checkout
 there** — `/root/*twenty*` is empty. The scripts above were run from `/root/esc-smoke/`, copied in
 and checksum-matched. A source build needs the tree put back on CT140 first.
+
+---
+
+## 2026-09-22c — the Tour button, and a front-only way to ship it
+
+Redmine [#19873](https://redmine.fiszu.com/issues/19873). The stored-state onboarding wizard
+was replaced, by operator decision on 2026-09-22, with a **Tour** entry in the CRM sidebar
+that anybody can press at any time. No table, no per-person flags, no record of who has taken
+it. See `scripts/PATCH_MANIFEST.md`, Category 3, for what the patch is and why.
+
+### The delivery route, and why it is not a source build
+
+The change is entirely in the frontend, so only the frontend is rebuilt:
+
+```
+esc/deploy/build-front-layer.sh <base-image> <new-tag>
+esc/deploy/Dockerfile.front-layer     # FROM <ESC image>; COPY build -> dist/front
+```
+
+**The server binary is not recompiled.** It is inherited from the base image, which means:
+
+- the Nest dependency-injection fault that took the CRM down for 16h41m on 2026-09-21 cannot
+  be reintroduced by this image — the server in it is the one already running;
+- the enterprise bypass and the SSRF allowlist, both compiled server patches, come along
+  untouched rather than being re-applied and re-verified.
+
+Two measured facts make it sound:
+
+- `git diff v2.0.0..HEAD -- packages/twenty-front` is **empty**. The fork has never changed
+  the frontend, so a rebuild from this tree is the bundle production already serves plus the
+  tour.
+- The server serves the front as plain static files (`ServeStaticModule`, rootPath
+  `dist/front`). No asset manifest, no integrity check, no CSP pinning script hashes.
+
+### Numbered step of the deploy
+
+Run on the **build host**, never CT175 — the script refuses if `twenty-esc-server-1` is on
+the host, because the frontend build alone asks for an 8 GB Node heap.
+
+1. Read the API base URL off the running image rather than trusting a note:
+
+   ```sh
+   sudo docker inspect twenty-esc-server-1 \
+     --format '{{range .Config.Env}}{{println .}}{{end}}' | grep REACT_APP_SERVER_BASE_URL
+   ```
+
+2. Build the frontend on the **build host** (CT140), where there is heap to spare:
+
+   ```sh
+   REACT_APP_SERVER_BASE_URL=https://esc.crm.fiszu.com \
+     ./esc/deploy/build-front-layer.sh --front-only
+   tar -C packages/twenty-front -czf twenty-front-build.tar.gz build
+   ```
+
+   Then carry that tarball to **the host that holds the base image** and build the layer
+   there. Today that host is CT175 and only CT175: `twenty-esc-sso:v2.0.0-ssrf1` exists in
+   its local docker store, in no registry, and in no saved tarball. The layer build is one
+   `COPY` — it needs no heap and is safe on a production box in a way the frontend build is
+   not:
+
+   ```sh
+   FRONT_BUILD_DIR=/root/twenty-front-build/build DOCKER='sudo docker' \
+     ./esc/deploy/build-front-layer.sh --layer-only \
+       twenty-esc-sso:v2.0.0-ssrf1 twenty-esc-sso:v2.0.0-tour1
+   ```
+
+   That split is forced by the image having no home. When the fork's images reach a
+   registry, both halves run on the build host and CT175 only pulls.
+
+3. **Save the image off the build host before it goes anywhere.** The fork's images live in
+   exactly one place today — a host's local docker store — and on 2026-09-22 two of them went
+   missing from CT175 with no attribution, which made the documented one-step rollback inert
+   and forced a full rebuild. Until there is a registry, a tarball is the rollback:
+
+   ```sh
+   sudo docker save twenty-esc-sso:v2.0.0-tour1 | gzip > twenty-esc-sso_v2.0.0-tour1.tar.gz
+   ```
+
+4. Cut over with `docker compose up -d`, **never `down`** — `twenty-ingest-app-1` shares
+   `twenty-esc_default`.
+
+5. Assert, in this order. A deploy is not done until all three exit 0:
+
+   ```sh
+   ./scripts/verify-esc-tour.sh --container twenty-esc-server-1
+   CONTAINER=twenty-esc-server-1 ./scripts/verify-esc-image.sh
+   curl -sf -o /dev/null -w '%{http_code}\n' https://esc.crm.fiszu.com/healthz
+   ```
+
+   The second one is not ceremony: a layer built over a bare `twentycrm/twenty:v2.0.0`
+   instead of an ESC image produces a healthy container that has silently lost the enterprise
+   bypass and the SSRF allowlist, and only that check says so.
+
+6. **Open the CRM in a browser and click Tour.** Every check above proves the tour is
+   *present*. None of them proves it *runs* — nothing that greps a bundle can. This step is
+   the proof, and the deploy is not finished without it.
+
+### Rollback
+
+Point `/root/twenty-esc/docker-compose.yml` back at the previous tag on **both** `server` and
+`worker` and `docker compose up -d server worker`. That is a one-step rollback only while the
+previous image is still on the box or a tarball of it exists somewhere else — see step 3.
