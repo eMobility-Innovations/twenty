@@ -1,5 +1,11 @@
 import { styled } from '@linaria/react';
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 import { type EscTourController } from '@/esc-tour/hooks/useEscTour';
@@ -27,15 +33,11 @@ const StyledBackdrop = styled.div`
   width: var(--esc-tour-width);
   height: var(--esc-tour-height);
   pointer-events: none;
-  transition:
-    top 180ms cubic-bezier(0.16, 1, 0.3, 1),
-    left 180ms cubic-bezier(0.16, 1, 0.3, 1),
-    width 180ms cubic-bezier(0.16, 1, 0.3, 1),
-    height 180ms cubic-bezier(0.16, 1, 0.3, 1);
-
-  @media (prefers-reduced-motion: reduce) {
-    transition: none;
-  }
+  /* No transition, on purpose, and for two reasons. The spotlight's geometry is re-read on
+     every animation frame so it can follow a target that scrolls or finishes loading — a
+     transition on the same properties would fight that and lag a frame behind the thing it
+     is supposed to be pointing at. And top/left/width/height are the properties this org's
+     own rules say not to animate. */
 `;
 
 /**
@@ -172,6 +174,32 @@ export const EscTourOverlay = ({ tour }: { tour: EscTourController }) => {
   useLayoutEffect(() => {
     popoverRef.current?.focus();
   }, [tour.step]);
+
+  // The interaction lock stops the mouse; Tab walks straight past it into the application
+  // underneath, which is the same failure by a different input device. Keeping focus inside
+  // the popover is what makes "every control except this one is disabled" true.
+  useEffect(() => {
+    if (!tour.isOpen) {
+      return;
+    }
+
+    const keepFocusInside = (event: FocusEvent) => {
+      const popover = popoverRef.current;
+
+      if (popover === null) {
+        return;
+      }
+
+      if (!popover.contains(event.target as Node)) {
+        event.stopPropagation();
+        popover.focus();
+      }
+    };
+
+    document.addEventListener('focusin', keepFocusInside, true);
+
+    return () => document.removeEventListener('focusin', keepFocusInside, true);
+  }, [tour.isOpen]);
 
   if (!tour.isOpen || tour.step === null) {
     return null;

@@ -22,6 +22,22 @@ export type EscTourController = {
   previous: () => void;
 };
 
+const isSameRect = (
+  left: EscTourRect | null,
+  right: EscTourRect | null,
+): boolean => {
+  if (left === null || right === null) {
+    return left === right;
+  }
+
+  return (
+    left.top === right.top &&
+    left.left === right.left &&
+    left.width === right.width &&
+    left.height === right.height
+  );
+};
+
 const readRect = (element: HTMLElement, padding: number): EscTourRect => {
   const domRect = element.getBoundingClientRect();
 
@@ -65,17 +81,17 @@ export const useEscTour = (
   );
 
   const next = useCallback(() => {
-    setStepIndex((currentIndex) => {
-      if (currentIndex >= showableSteps.length - 1) {
-        setIsOpen(false);
-        setAnchorRect(null);
+    // Deliberately NOT a side effect inside a setState updater: React may call an updater
+    // twice, and closing the tour from inside one is the kind of thing that works until
+    // StrictMode runs it again.
+    if (stepIndex >= showableSteps.length - 1) {
+      close();
 
-        return currentIndex;
-      }
+      return;
+    }
 
-      return currentIndex + 1;
-    });
-  }, [showableSteps.length]);
+    setStepIndex(stepIndex + 1);
+  }, [stepIndex, showableSteps.length, close]);
 
   const previous = useCallback(() => {
     setStepIndex((currentIndex) => Math.max(0, currentIndex - 1));
@@ -90,13 +106,20 @@ export const useEscTour = (
     }
 
     let animationFrameId = 0;
+    let lastRect: EscTourRect | null = null;
 
     const track = () => {
       const { element } = resolveEscTourAnchor(step);
+      const nextRect =
+        element === null ? null : readRect(element, step.padding ?? 4);
 
-      setAnchorRect(
-        element === null ? null : readRect(element, step.padding ?? 4),
-      );
+      // Only write when it actually moved. Without this the tour sets state sixty times a
+      // second with a fresh object every time, so React re-renders sixty times a second
+      // for as long as the tour is open.
+      if (!isSameRect(lastRect, nextRect)) {
+        lastRect = nextRect;
+        setAnchorRect(nextRect);
+      }
 
       animationFrameId = window.requestAnimationFrame(track);
     };
