@@ -180,6 +180,53 @@ behaves differently from the thing you tested.
 - Built image: `scripts/verify-esc-image.sh`, which greps the compiled `dist/`.
 - Live: a workflow step calling the allowlisted host must succeed. Nothing short of that proves it.
 
+## Category 3: base image pinned by digest
+
+### Why this patch exists
+
+Upstream's `packages/twenty-docker/twenty/Dockerfile` uses the moving tag
+`node:24-alpine` on all three of its stages. An image built from a moving tag cannot be
+rebuilt identically, and nobody is told when the runtime moves underneath them.
+
+Measured 2026-09-22: production (`twenty-esc-sso:v2.0.0-ssrf1`) runs Node **v24.15.0**;
+a source build of the same fork three days later picked up **v24.21.0** from that tag.
+Neither number was chosen by anybody.
+
+### The patch (single file, three FROM lines)
+
+| File (overlay path) | What changed | Conflict resolution |
+|---------------------|--------------|---------------------|
+| `packages/twenty-docker/twenty/Dockerfile` | All three `FROM node:24-alpine` become `FROM node:24.15.0-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f`. Nothing else differs from upstream — verified by `diff` against the upstream file. | If upstream restructures the stages, re-copy the fresh upstream file and re-pin every `FROM node:` line. `verify-esc-features.sh` fails if any of them loses its digest, so a missed line is caught rather than shipped. |
+
+**Pinned to 24.15.0, production's runtime — not to the current `24-alpine` digest.**
+Operator decision, 2026-09-22. The cutover from the compiled-patch image to a source
+build already changes the entire build route; carrying a six-patch Node bump in the same
+change gives a misbehaving image two suspects instead of one. Moving Node is a separate,
+deliberate change.
+
+The digest is the **multi-arch index** digest, so the pin holds on amd64 and arm64.
+Verified behaviourally rather than by reading the tag:
+
+```sh
+docker buildx imagetools inspect node:24.15.0-alpine     # -> sha256:d1b3b4da...
+docker run --rm node@sha256:d1b3b4da... node --version   # -> v24.15.0
+```
+
+### To move Node deliberately
+
+Pick the version, resolve its index digest with `docker buildx imagetools inspect
+node:<version>-alpine`, **run the container and read `node --version` back** — a tag name
+is not evidence — then update all three `FROM` lines together and say so in DEPLOY.md.
+
+### Verification
+
+`scripts/verify-esc-features.sh` section 3 counts `^FROM node:` lines in the applied tree
+and requires every one to carry an exact version and a 64-hex digest. It prints the
+offending lines when they do not match, and it fails rather than warns: an unpinned base
+image is how the two Node versions above happened.
+
+---
+
 ## Licensing / legal (AGPLv3)
 
 - Twenty is **AGPLv3**. Modifying it and self-hosting is permitted; AGPL §13 only

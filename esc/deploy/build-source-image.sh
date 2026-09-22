@@ -75,13 +75,35 @@ echo "    APP_VERSION : ${APP_VERSION}"
 
 # A dirty tree means the image cannot be reproduced from any commit, which is the whole
 # problem this script exists to end. Refuse rather than build something untraceable.
-# The overlay's own writes are expected, so this runs BEFORE esc-apply.sh.
-if [ -n "$(git status --porcelain)" ]; then
-  echo "build-source-image: the working tree is dirty. An image built from it cannot be" >&2
-  echo "build-source-image:   traced to a commit, which is the exact failure this script" >&2
-  echo "build-source-image:   exists to end. Commit or stash first." >&2
-  git status --short >&2
+#
+# 🔧 NARROWED 2026-09-22. This used to refuse on ANY dirty path, which meant the script
+# could not run TWICE IN THE SAME CHECKOUT: esc-apply.sh overlays files into the tree on
+# the first run, and the second run saw its own writes and refused. That bites the next
+# person, not the one who wrote it — the build host's checkout is dirty the moment a build
+# finishes. Measured on CT140 2026-09-22: /root/twenty-esc-src carried two modified paths
+# after a build, and now carries three, because the overlay gained the Dockerfile.
+#
+# The intent was never "no modified files", it was "nothing I cannot account for". So the
+# overlay's OWN targets are excluded — derived from esc/overlay/ rather than listed, so a
+# fourth overlay file needs no edit here — and everything else still refuses.
+OVERLAY_DIR="${REPO_ROOT}/esc/overlay"
+EXPECTED_DIRTY="$(cd "${OVERLAY_DIR}" && find . -type f | sed 's|^\./||' | sort)"
+
+DIRTY="$(git status --porcelain | awk '{print $NF}' | sort)"
+UNEXPECTED="$(comm -23 <(printf '%s\n' "${DIRTY}") <(printf '%s\n' "${EXPECTED_DIRTY}") | grep -v '^$' || true)"
+
+if [ -n "${UNEXPECTED}" ]; then
+  echo "build-source-image: the working tree carries changes the overlay does not account" >&2
+  echo "build-source-image:   for. An image built from it cannot be traced to a commit," >&2
+  echo "build-source-image:   which is the exact failure this script exists to end." >&2
+  echo "build-source-image:   Commit or stash these first:" >&2
+  printf '%s\n' "${UNEXPECTED}" | sed 's/^/       /' >&2
   exit 1
+fi
+
+if [ -n "${DIRTY}" ]; then
+  echo "    overlay-applied paths already present in the tree (expected):"
+  printf '%s\n' "${DIRTY}" | sed 's/^/      /'
 fi
 
 if [ "$RUN_APPLY" = true ]; then
