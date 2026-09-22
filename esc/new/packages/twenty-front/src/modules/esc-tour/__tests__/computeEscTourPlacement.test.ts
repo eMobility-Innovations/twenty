@@ -55,8 +55,9 @@ describe('computeEscTourPlacement', () => {
   });
 
   it('flips to the left of the anchor when neither right nor below has room', () => {
+    // top 800 matters: at 600 there is still room BELOW, and below is preferred over left.
     const placement = computeEscTourPlacement({
-      anchorRect: { top: 600, left: 1000, width: 400, height: 40 },
+      anchorRect: { top: 800, left: 1000, width: 400, height: 40 },
       ...POPOVER,
       ...VIEWPORT,
     });

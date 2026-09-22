@@ -20,8 +20,24 @@ const buildController = (
 });
 
 describe('EscTourOverlay', () => {
+  // Deliberately NOT `document.body.innerHTML = ''`. React Testing Library removes its own
+  // container on cleanup, and wiping the body first takes that node away from under it —
+  // every test then fails on unmount with "The node to be removed is not a child of this
+  // node", which says nothing about the component. Anything a test adds itself is removed
+  // by reference instead.
+  const addedNodes: HTMLElement[] = [];
+
+  const addToPage = (element: HTMLElement) => {
+    document.body.appendChild(element);
+    addedNodes.push(element);
+
+    return element;
+  };
+
   afterEach(() => {
-    document.body.innerHTML = '';
+    while (addedNodes.length > 0) {
+      addedNodes.pop()?.remove();
+    }
   });
 
   it('renders nothing while the tour is closed', () => {
@@ -73,9 +89,8 @@ describe('EscTourOverlay', () => {
 
   // Blocking the mouse and leaving Tab free is the same hole by a different input device.
   it('pulls focus back when something behind the overlay takes it', () => {
-    const outsideButton = document.createElement('button');
+    const outsideButton = addToPage(document.createElement('button'));
 
-    document.body.appendChild(outsideButton);
     render(<EscTourOverlay tour={buildController()} />);
 
     fireEvent.focusIn(outsideButton);

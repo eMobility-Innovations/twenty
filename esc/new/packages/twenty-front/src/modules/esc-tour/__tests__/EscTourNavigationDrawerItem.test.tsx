@@ -30,8 +30,28 @@ jest.mock('twenty-ui/display', () => ({ IconMap: () => null }), {
 });
 
 describe('EscTourNavigationDrawerItem', () => {
+  // Deliberately NOT `document.body.innerHTML = ''`. React Testing Library removes its own
+  // container on cleanup, and wiping the body first takes that node away from under it —
+  // every test then fails on unmount with "The node to be removed is not a child of this
+  // node", which says nothing about the component.
+  const addedNodes: HTMLElement[] = [];
+
+  const putRouteLinksOnThePage = (routes: string[]) => {
+    for (const route of routes) {
+      const link = document.createElement('a');
+
+      link.setAttribute('href', `/objects/${route}`);
+      document.body.appendChild(link);
+      addedNodes.push(link);
+    }
+  };
+
   afterEach(() => {
-    document.body.innerHTML = '';
+    while (addedNodes.length > 0) {
+      addedNodes.pop()?.remove();
+    }
+
+    document.getElementById('esc-tour-stylesheet')?.remove();
     jest.restoreAllMocks();
   });
 
@@ -87,9 +107,14 @@ describe('EscTourNavigationDrawerItem', () => {
   it('says nothing when every anchor resolves', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    document.body.innerHTML = ['people', 'companies', 'orders', 'repairs', 'interactions', 'tasks']
-      .map((route) => `<a href="/objects/${route}">${route}</a>`)
-      .join('');
+    putRouteLinksOnThePage([
+      'people',
+      'companies',
+      'orders',
+      'repairs',
+      'interactions',
+      'tasks',
+    ]);
 
     render(<EscTourNavigationDrawerItem />);
     fireEvent.click(screen.getByText('Tour'));
