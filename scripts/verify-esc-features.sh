@@ -20,6 +20,7 @@ check_warn() { echo -e "  ${YELLOW}WARN${NC} $1"; WARN=$((WARN + 1)); }
 
 PLAN_SVC="${APP_DIR}/packages/twenty-server/src/engine/core-modules/enterprise/services/enterprise-plan.service.ts"
 PRIVATE_IP_UTIL="${APP_DIR}/packages/twenty-server/src/engine/core-modules/secure-http-client/utils/is-private-ip.util.ts"
+PATCH_CJS="${APP_DIR}/esc/deploy/patch-enterprise.cjs"
 
 echo -e "${BOLD}"
 echo "  ESC Twenty Feature Verification"
@@ -65,6 +66,50 @@ else
         check_pass "ESC patch marker comment present"
     else
         check_warn "ESC patch marker comment missing (cosmetic, not functional)"
+    fi
+
+    # ── PARITY WITH THE COMPILED PATCH, DERIVED — NOT A HARD-CODED LIST ──────
+    #
+    # ADDED 2026-09-22. Until then this script checked isValid() and nothing else,
+    # while esc/deploy/patch-enterprise.cjs overrides FOUR methods on the compiled
+    # image and says in its own header why one is not enough: the frontend reads
+    # getSubscriptionStatus() and getLicenseInfo(). A source build overriding only
+    # isValid() puts the "enterprise key no longer valid" banner in front of every
+    # user, and reports PASS while doing it.
+    #
+    # Option B (the compiled patch) is this fork's stated rollback for option A (the
+    # source build), so the two must be provably equivalent. The method list is READ
+    # OUT OF the compiled patch rather than written down here, so adding a fifth
+    # method there cannot leave this check silently behind.
+    if [ ! -f "${PATCH_CJS}" ]; then
+        check_fail "esc/deploy/patch-enterprise.cjs not found — cannot derive the method list the source overlay must match"
+    else
+        PATCHED_METHODS="$(grep -oE '\$1(async )?[A-Za-z]+\(\)' "${PATCH_CJS}" \
+            | sed -E 's/^\$1(async )?//; s/\(\)$//' | sort -u)"
+
+        if [ -z "${PATCHED_METHODS}" ]; then
+            check_fail "could not read any patched method name out of patch-enterprise.cjs — the extraction is broken, not the patch"
+        else
+            for METHOD in ${PATCHED_METHODS}; do
+                # Two traps, both hit while writing this check:
+                #  - `async getLicenseInfo(` does not contain `  getLicenseInfo(`, so a
+                #    plain substring match reads two of the four methods as MISSING.
+                #  - a multi-line signature such as `getSubscriptionStatus(): Promise<{`
+                #    closes with `  } | null> {`, so an end anchor of /^  \}/ stops
+                #    before the body and reports an overridden method as not overridden.
+                # Hence: anchor the declaration, and end only on a line that is exactly
+                # two spaces and a brace.
+                METHOD_BODY="$(awk -v m="${METHOD}" '$0 ~ "^  (async )?" m "\\(" {f=1} f{print} f&&/^  \}$/{exit}' "${PLAN_SVC}")"
+
+                if [ -z "${METHOD_BODY}" ]; then
+                    check_fail "${METHOD}() is patched on the compiled image but is MISSING from the source overlay"
+                elif printf '%s\n' "${METHOD_BODY}" | grep -q "ESC OVERLAY PATCH"; then
+                    check_pass "${METHOD}() is overridden in the source overlay too"
+                else
+                    check_fail "${METHOD}() is patched on the compiled image but NOT overridden in the source overlay — a source build will diverge from production here"
+                fi
+            done
+        fi
     fi
 fi
 
