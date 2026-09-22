@@ -237,6 +237,19 @@ if [ -n "${DIFF_RANGE:-}" ]; then
 # already was: it is a record of the fork's own decisions, not application code, and the
 # org requires one per session. Added 2026-09-21, when the first handover tripped this.
 #
+# `upgrade-version-command/2-0/2-0-instance-command-fast-*-add-esc-onboarding.ts` and
+# `upgrade-version-command/instance-commands.constant.ts` join them 2026-09-22. The
+# wizard's table was shipped as a legacy TypeORM migration alone, and the image
+# entrypoint runs those ONLY when the `core` schema is absent — so on CT175 it would
+# never have been created. The instance command is the mechanism `command:prod
+# upgrade` actually executes, and the constant is the single registry it is read
+# from (upstream's own generator edits that file, which is why it is one line of
+# ours in an upstream file, listed in docs/UPSTREAM-DIVERGENCE.md). Both are covered
+# by the esc-onboarding gate above: esc-onboarding-migration-path.spec.ts asserts the
+# command lands in the sequence after the cursor production is parked on, that its
+# DDL matches the migration's, and that no fork-owned migration is left without a
+# registered command.
+#
 # Three of the allowlisted paths are upstream files, not fork files:
 # FeatureFlagKey.ts, core-engine.module.ts and workspace-entity-manager.spec.ts.
 # Each carries exactly one line of ours, and each is forced: a new flag member, a
@@ -255,7 +268,7 @@ unexpected="$({
   git diff --name-only
   git diff --cached --name-only
   git ls-files --others --exclude-standard
-} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|docs/preflight/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|\.gitignore|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts)$' || true)"
+} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|docs/preflight/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|\.gitignore|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/2-0/2-0-instance-command-fast-[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/instance-commands\.constant\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts)$' || true)"
 
 if [ -n "$unexpected" ]; then
   {
