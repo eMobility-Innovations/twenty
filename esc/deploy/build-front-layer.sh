@@ -81,16 +81,38 @@ if [ "${DO_FRONT}" = true ]; then
     echo "==> applying the ESC overlay"
     "${REPO_ROOT}/esc/esc-apply.sh" --no-verify
 
-    echo "==> building twenty-front (REACT_APP_SERVER_BASE_URL=${REACT_APP_SERVER_BASE_URL})"
     rm -rf "${REPO_ROOT}/packages/twenty-front/build"
-    (
-        cd "${REPO_ROOT}"
-        npx nx run twenty-front:lingui:extract
-        npx nx run twenty-front:lingui:compile
-        REACT_APP_SERVER_BASE_URL="${REACT_APP_SERVER_BASE_URL}" \
-            NODE_OPTIONS="--max-old-space-size=8192" \
-            npx nx build twenty-front
-    )
+
+    if [ "${ESC_FRONT_BUILD_MODE:-docker}" = "docker" ]; then
+        # Upstream's own twenty-front-build stage, used exactly as upstream wrote it. This
+        # is the reproducible route: the build host needs docker and nothing else — no node,
+        # no yarn, no corepack, and no 14-minute yarn install to keep in step with the
+        # lockfile by hand. CT140 is a GitLab box; it should not grow a JS toolchain.
+        echo "==> building twenty-front in docker (upstream's twenty-front-build stage)"
+        ${DOCKER} build \
+            --target twenty-front-build \
+            --build-arg "REACT_APP_SERVER_BASE_URL=${REACT_APP_SERVER_BASE_URL}" \
+            -f "${REPO_ROOT}/packages/twenty-docker/twenty/Dockerfile" \
+            -t "${ESC_FRONT_BUILD_IMAGE:-esc-front-build:latest}" \
+            "${REPO_ROOT}"
+
+        echo "==> extracting the built frontend"
+        EXTRACT_ID="$(${DOCKER} create "${ESC_FRONT_BUILD_IMAGE:-esc-front-build:latest}")"
+        mkdir -p "${REPO_ROOT}/packages/twenty-front"
+        ${DOCKER} cp "${EXTRACT_ID}:/app/packages/twenty-front/build" \
+            "${REPO_ROOT}/packages/twenty-front/build"
+        ${DOCKER} rm -f "${EXTRACT_ID}" >/dev/null
+    else
+        echo "==> building twenty-front on this host (ESC_FRONT_BUILD_MODE=host)"
+        (
+            cd "${REPO_ROOT}"
+            npx nx run twenty-front:lingui:extract
+            npx nx run twenty-front:lingui:compile
+            REACT_APP_SERVER_BASE_URL="${REACT_APP_SERVER_BASE_URL}" \
+                NODE_OPTIONS="--max-old-space-size=8192" \
+                npx nx build twenty-front
+        )
+    fi
 
     if [ ! -f "${FRONT_BUILD_DIR}/index.html" ]; then
         echo "BUILD PRODUCED NO index.html at ${FRONT_BUILD_DIR}" >&2
