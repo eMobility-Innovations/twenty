@@ -102,6 +102,17 @@ const main = async () => {
 
   clearTimeout(timer);
   console.log(JSON.stringify(report, null, 2));
+
+  // One canonical line for callers to match on. Matching the JSON is a trap: the
+  // report carries `isValid` at the top level AND inside reportsEnterpriseValid, so a
+  // glob over the whole document can pair a true from one with a false from the other.
+  const verdict = report.reportsEnterpriseValid;
+
+  console.log(
+    `ESC_ENTERPRISE_VERDICT: ${Object.keys(verdict)
+      .map((key) => `${key}=${verdict[key] === true}`)
+      .join(' ')}`,
+  );
 };
 
 main().catch((error) => {

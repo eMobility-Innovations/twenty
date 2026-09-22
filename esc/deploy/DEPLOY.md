@@ -175,3 +175,81 @@ the running image is a different claim. That belongs to the boot smoke test agai
 production dump — next step 4 of
 [the preflight handover](../../docs/handovers/2026-09-22_cutover-incident-and-preflight.md) — and it
 must be done before the cutover, not after.
+
+---
+
+## 2026-09-22b — the two gates that were missing, and what they were proven against
+
+Redmine [#19873](https://redmine.fiszu.com/issues/19873), preflight blockers 6 and 7.
+
+### Boot smoke test — `esc/deploy/boot-smoke-test.sh`
+
+Nothing used to boot the image before it was deployed. `build-source-image.sh` inspects a
+filesystem; `/healthz` is never asked. That is how a Nest DI fault shipped on 2026-09-21 behind
+five green checks.
+
+The smoke test starts throwaway Postgres and Redis, boots the image with **production's key set**
+(`smoke.env.template`, placeholder values — what shapes the provider graph is which keys are SET),
+asserts `/healthz`, then reproduces **CT175's actual state** — `core` schema present,
+`escOnboarding` dropped, the command's `upgradeMigration` row deleted — and asserts
+`command:prod upgrade` puts the table back and records itself `completed`. No production dump
+needed. It refuses to run on a host where `twenty-esc-server-1` exists.
+
+**Proven to FAIL on the pre-fix image**, on CT140, 2026-09-22:
+
+```
+$ ESC_SMOKE_BOOT_TIMEOUT=120 ./boot-smoke-test.sh twenty-esc-src:v2.0.0-esc1
+ERROR [ExceptionHandler] UnknownDependenciesException [Error]: Nest can't resolve
+dependencies of the c790a9fe90dd379d1eec5 (?). Please make sure that the argument
+PermissionsService at index [0] is available in the EscOnboardingModule module.
+SMOKE FAILED: the container exited before it served
+SCRIPT_RC=1
+```
+
+That is the outage, caught by the gate that did not exist when it happened.
+
+**NOT yet proven to PASS.** That needs a source image built from the trunk, which has not been
+built. A gate seen only to fail is half a gate — do the positive control before trusting it.
+
+### Behavioural enterprise check — `esc/deploy/verify-esc-enterprise-behaviour.sh`
+
+The critic's point stands: option B regex-injects `return true;` onto the signature line of the
+compiled file, option A's `nest build` pretty-prints, so **the two routes produce different
+compiled text for identical semantics and no grep can verify both**. Two checks were wrong because
+of it, in opposite directions, and both are now replaced by this one:
+
+| Where | Was | Now |
+|---|---|---|
+| `scripts/verify-esc-image.sh:28` | grepped `isValid() { return true;` — **fails on a correct source image** | runs the probe in the running container |
+| `esc/deploy/build-source-image.sh` | grepped the whole file for `return true` — a string upstream ships twice, so it **could not fail** | runs the probe against the built image |
+
+`enterprise-behaviour-probe.cjs` executes the four methods inside the image with `--network none`,
+so the answer owes nothing to a licensing server and an unpatched `getSubscriptionStatus()` cannot
+reach one. It prints one canonical `ESC_ENTERPRISE_VERDICT:` line; matching the JSON is a trap,
+because `isValid` appears both at the top level and inside `reportsEnterpriseValid`.
+
+Both directions measured 2026-09-22:
+
+```
+production  twenty-esc-sso:v2.0.0-ssrf1  (on CT175, --rm --network none --memory 512m)
+  ESC_ENTERPRISE_VERDICT: isValid=true hasValidEnterpriseValidityToken=true licenceIsValid=true subscriptionActive=true
+  getLicenseInfo → licensee "ESC Self-Hosted", subscriptionId "self-hosted-esc", expires 2036-09-19
+
+pre-fix     twenty-esc-src:v2.0.0-esc1   (on CT140)
+  ESC_ENTERPRISE_VERDICT: isValid=true hasValidEnterpriseValidityToken=false licenceIsValid=false subscriptionActive=false
+  exit 1
+```
+
+The second line is **blocker 5 measured on the real image** rather than inferred from a diff:
+three of the four methods report invalid, which is the "enterprise key no longer valid" banner in
+front of every user. It also confirms the licence constants now in the source overlay match what
+production actually returns.
+
+`build-source-image.sh` now runs the boot smoke test before it calls an image good. `SKIP_BOOT_SMOKE=1`
+exists and says loudly, by name, that the image was not booted.
+
+### Correction to the earlier handover
+
+It said the build host's checkout is at `/root/twenty-esc-src` on CT140. **There is no checkout
+there** — `/root/*twenty*` is empty. The scripts above were run from `/root/esc-smoke/`, copied in
+and checksum-matched. A source build needs the tree put back on CT140 first.

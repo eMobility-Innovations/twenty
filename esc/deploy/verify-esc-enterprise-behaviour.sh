@@ -34,23 +34,18 @@ probe_image() {
     --entrypoint node "$1" - < "${PROBE}"
 }
 
+# The probe prints one canonical verdict line. Matching the JSON instead is a trap:
+# `isValid` appears at the top level AND inside reportsEnterpriseValid, so a glob over
+# the document can pair a true from one with a false from the other. This also keeps
+# the script free of any dependency on the HOST having node — only the image needs it.
 verdict_of() {
-  printf '%s' "$1" | node -e '
-let raw = "";
-process.stdin.on("data", (chunk) => (raw += chunk));
-process.stdin.on("end", () => {
-  const report = JSON.parse(raw);
-  const v = report.reportsEnterpriseValid || {};
-  const keys = ["isValid", "hasValidEnterpriseValidityToken", "licenceIsValid", "subscriptionActive"];
-  console.log(keys.map((k) => `${k}=${v[k] === true}`).join(" "));
-});'
+  printf '%s\n' "$1" | grep '^ESC_ENTERPRISE_VERDICT:' || echo 'ESC_ENTERPRISE_VERDICT: (no verdict — the probe did not complete)'
 }
 
+ALL_VALID='ESC_ENTERPRISE_VERDICT: isValid=true hasValidEnterpriseValidityToken=true licenceIsValid=true subscriptionActive=true'
+
 all_valid() {
-  case "$1" in
-    *"=false"*) return 1 ;;
-    *) return 0 ;;
-  esac
+  [ "$1" = "${ALL_VALID}" ]
 }
 
 if [ ! -f "${PROBE}" ]; then
