@@ -21,7 +21,10 @@
 // nothing connects to a database, and ENTERPRISE_API_URL is deliberately unroutable.
 'use strict';
 
+// The path inside the image. Overridable ONLY so esc/deploy/tests/ can point it at a
+// fake service and assert the verdict logic; in an image nothing sets it.
 const SERVICE_PATH =
+  process.env.ESC_PROBE_SERVICE_PATH ||
   '/app/packages/twenty-server/dist/engine/core-modules/enterprise/services/enterprise-plan.service.js';
 
 const CONFIG = {
