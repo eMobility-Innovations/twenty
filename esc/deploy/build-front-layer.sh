@@ -62,10 +62,16 @@ assert_tour_in_build() {
 }
 
 if [ "${DO_FRONT}" = true ]; then
-    if [ -z "${REACT_APP_SERVER_BASE_URL:-}" ]; then
-        echo "REACT_APP_SERVER_BASE_URL is not set." >&2
-        echo "  Read it off the running image rather than trusting a note:" >&2
+    # It must be SET, and it is allowed to be EMPTY — because on CT175 it IS empty. The
+    # browser gets the API host at runtime from window._env_, which the image entrypoint
+    # writes from SERVER_URL; the build-time define is the fallback underneath it. Baking a
+    # URL in where production has none is a difference from production that nothing in the
+    # image would report, so the value is taken deliberately rather than defaulted.
+    if [ -z "${REACT_APP_SERVER_BASE_URL+set}" ]; then
+        echo "REACT_APP_SERVER_BASE_URL is not set (set it to empty if production's is empty)." >&2
+        echo "  Read it off the running container rather than trusting a note:" >&2
         echo "    docker inspect twenty-esc-server-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep REACT_APP_SERVER_BASE_URL" >&2
+        echo "  Measured on CT175, 2026-09-22: it is EMPTY, and SERVER_URL carries the host." >&2
         exit 2
     fi
 

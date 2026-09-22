@@ -292,18 +292,24 @@ Two measured facts make it sound:
 Run on the **build host**, never CT175 — the script refuses if `twenty-esc-server-1` is on
 the host, because the frontend build alone asks for an 8 GB Node heap.
 
-1. Read the API base URL off the running image rather than trusting a note:
+1. Read the API base URL off the running container rather than trusting a note:
 
    ```sh
    sudo docker inspect twenty-esc-server-1 \
-     --format '{{range .Config.Env}}{{println .}}{{end}}' | grep REACT_APP_SERVER_BASE_URL
+     --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'REACT_APP_SERVER_BASE_URL|SERVER_URL'
    ```
+
+   Measured 2026-09-22: `REACT_APP_SERVER_BASE_URL` is **empty**, and `SERVER_URL` is
+   `https://esc.crm.fiszu.com`. The browser gets the API host at runtime from `window._env_`,
+   which the image entrypoint writes from `SERVER_URL`; the value compiled into the bundle is
+   only the fallback underneath it. So the rebuild bakes in the same **empty** value.
+   Baking a URL in where production has none is a difference from production that nothing in
+   the image would report.
 
 2. Build the frontend on the **build host** (CT140), where there is heap to spare:
 
    ```sh
-   REACT_APP_SERVER_BASE_URL=https://esc.crm.fiszu.com \
-     ./esc/deploy/build-front-layer.sh --front-only
+   REACT_APP_SERVER_BASE_URL= ./esc/deploy/build-front-layer.sh --front-only
    tar -C packages/twenty-front -czf twenty-front-build.tar.gz build
    ```
 
