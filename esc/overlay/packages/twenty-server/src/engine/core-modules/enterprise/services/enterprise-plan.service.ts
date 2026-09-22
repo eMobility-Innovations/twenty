@@ -28,6 +28,16 @@ import {
 } from 'src/engine/core-modules/twenty-config/twenty-config.exception';
 import { TwentyConfigService } from 'src/engine/core-modules/twenty-config/twenty-config.service';
 
+// ─── ESC OVERLAY PATCH (esc/enterprise-sso-overlay) ──────────────────────────
+// The licence this instance reports. Kept byte-identical to the values in
+// esc/deploy/patch-enterprise.cjs, which patches the compiled image — the two routes
+// are each other's rollback, so they must present the same licence.
+const ESC_LICENSEE = 'ESC Self-Hosted';
+const ESC_SUBSCRIPTION_ID = 'self-hosted-esc';
+const ESC_VALIDITY_WINDOW_MS = 315360000000; // ~10 years
+
+const escFarFutureDate = (): Date => new Date(Date.now() + ESC_VALIDITY_WINDOW_MS);
+
 @Injectable()
 export class EnterprisePlanService implements OnModuleInit {
   private readonly logger = new Logger(EnterprisePlanService.name);
@@ -133,13 +143,22 @@ export class EnterprisePlanService implements OnModuleInit {
   }
 
   hasValidEnterpriseValidityToken(): boolean {
-    if (isDefined(this.cachedValidityPayload)) {
-      const now = Math.floor(Date.now() / 1000);
-
-      return this.cachedValidityPayload.exp > now;
-    }
-
-    return false;
+    // ─── ESC OVERLAY PATCH (esc/enterprise-sso-overlay) ──────────────────────
+    // Clears the frontend's "Your enterprise key is no longer valid" banner.
+    // InformationBannerInvalidEnterpriseKey renders whenever
+    // hasValidEnterpriseKey === true && hasValidSignedEnterpriseKey !== true &&
+    // hasValidEnterpriseValidityToken !== true, and all three are ResolveFields
+    // straight off this service (workspace.resolver.ts). ENTERPRISE_KEY is
+    // `self-hosted-esc`, not a signed JWT, so hasValidSignedEnterpriseKey is false
+    // and the banner appears for EVERY signed-in user unless this returns true.
+    //
+    // Upstream returned the cached validity payload's expiry check, which is false
+    // without a remotely-issued validity token.
+    //
+    // This is the source-build half of esc/deploy/patch-enterprise.cjs, which
+    // overrides FOUR methods on the compiled image. Overriding fewer here makes a
+    // source build differ from production in a way users see immediately.
+    return true;
   }
 
   hasValidEnterpriseKey(): boolean {
@@ -175,25 +194,18 @@ export class EnterprisePlanService implements OnModuleInit {
   }
 
   async getLicenseInfo(): Promise<EnterpriseLicenseInfo> {
-    this.refreshKeyPayload();
-    await this.loadValidityToken();
-
-    if (isDefined(this.cachedValidityPayload)) {
-      const now = Math.floor(Date.now() / 1000);
-
-      return {
-        isValid: this.cachedValidityPayload.exp > now,
-        licensee: this.cachedKeyPayload?.licensee ?? null,
-        expiresAt: new Date(this.cachedValidityPayload.exp * 1000),
-        subscriptionId: this.cachedValidityPayload.sub,
-      };
-    }
-
+    // ─── ESC OVERLAY PATCH (esc/enterprise-sso-overlay) ──────────────────────
+    // The frontend reads this for the licence/enterprise settings screen. Upstream
+    // returns isValid: false with null fields when there is no remotely-issued
+    // validity token, which is the state a self-hosted placeholder key is always in.
+    //
+    // Values match esc/deploy/patch-enterprise.cjs exactly, so the source build and
+    // the compiled image present the same licence.
     return {
-      isValid: false,
-      licensee: null,
-      expiresAt: null,
-      subscriptionId: null,
+      isValid: true,
+      licensee: ESC_LICENSEE,
+      expiresAt: escFarFutureDate(),
+      subscriptionId: ESC_SUBSCRIPTION_ID,
     };
   }
 
@@ -327,52 +339,21 @@ export class EnterprisePlanService implements OnModuleInit {
     currentPeriodEnd: Date | null;
     isCancellationScheduled: boolean;
   } | null> {
-    this.refreshKeyPayload();
-
-    const enterpriseKey = this.twentyConfigService.get('ENTERPRISE_KEY');
-
-    if (!enterpriseKey || !isDefined(this.cachedKeyPayload)) {
-      return null;
-    }
-
-    const licenseInfo = await this.getLicenseInfo();
-    const apiUrl = this.twentyConfigService.get('ENTERPRISE_API_URL');
-    const statusUrl = `${apiUrl}/status`;
-
-    try {
-      const response = await fetch(statusUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enterpriseKey }),
-      });
-
-      if (!response.ok) {
-        this.logger.warn(
-          `Enterprise status request failed with status ${response.status}`,
-        );
-
-        return null;
-      }
-
-      const data = await response.json();
-
-      return {
-        status: data.status,
-        licensee: licenseInfo.licensee,
-        expiresAt: licenseInfo.expiresAt,
-        cancelAt: data.cancelAt ? new Date(data.cancelAt * 1000) : null,
-        currentPeriodEnd: data.currentPeriodEnd
-          ? new Date(data.currentPeriodEnd * 1000)
-          : null,
-        isCancellationScheduled: data.isCancellationScheduled ?? false,
-      };
-    } catch (error) {
-      this.logger.warn(
-        `Enterprise status request failed: ${error instanceof Error ? error.message : 'Network error'}`,
-      );
-
-      return null;
-    }
+    // ─── ESC OVERLAY PATCH (esc/enterprise-sso-overlay) ──────────────────────
+    // Upstream POSTs ENTERPRISE_KEY to `${ENTERPRISE_API_URL}/status` and returns
+    // null on any non-ok response — so leaving it unpatched both shows the licence
+    // as inactive AND starts making outbound calls to Twenty's licensing API that
+    // this instance has never made.
+    //
+    // Values match esc/deploy/patch-enterprise.cjs exactly.
+    return {
+      status: 'active',
+      licensee: ESC_LICENSEE,
+      expiresAt: escFarFutureDate(),
+      cancelAt: null,
+      currentPeriodEnd: escFarFutureDate(),
+      isCancellationScheduled: false,
+    };
   }
 
   async getPortalUrl(returnUrl?: string): Promise<string | null> {

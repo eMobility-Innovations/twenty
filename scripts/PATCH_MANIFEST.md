@@ -79,20 +79,57 @@ In code (`packages/twenty-server/src/engine/core-modules/`):
 - There is **no local env/flag** that fakes a valid key. On v2.0 you cannot enable
   SSO without either a real (paid) key or a code change.
 
-### The patch (single file, single method)
+### The patch (single file, FOUR methods)
 
 | File (overlay path) | What changed | Conflict resolution |
 |---------------------|--------------|---------------------|
-| `packages/twenty-server/src/engine/core-modules/enterprise/services/enterprise-plan.service.ts` | `isValid()` now `return true;` unconditionally (was `return this.hasValidEnterpriseValidityToken();`). **Only the method body changed** — signature, every other method, and all imports are byte-for-byte upstream. | If upstream refactors `isValid()` or moves the gate, find the new method/guard that `EnterpriseFeaturesEnabledGuard` consults and make it report valid. The principle: **the guard that throws "Enterprise features are not enabled" must pass.** Re-copy the fresh upstream file into the overlay, then re-apply only the `isValid → true` change so the rest of the file stays current. |
+| `packages/twenty-server/src/engine/core-modules/enterprise/services/enterprise-plan.service.ts` | Four method bodies replaced, plus three module-level constants: `isValid()` → `true`; `hasValidEnterpriseValidityToken()` → `true`; `getLicenseInfo()` → a valid ESC licence; `getSubscriptionStatus()` → `status: 'active'`. Signatures, every other method and all imports are byte-for-byte upstream. | If upstream refactors any of them or moves the gate, find the new method/guard that `EnterpriseFeaturesEnabledGuard` consults and make it report valid. The principle: **the guard that throws "Enterprise features are not enabled" must pass, and the frontend must not see an invalid licence.** Re-copy the fresh upstream file into the overlay, then re-apply the four overrides so the rest of the file stays current. |
+
+**Why four, not one — corrected 2026-09-22.** Until then the source overlay overrode
+`isValid()` only, while `esc/deploy/patch-enterprise.cjs` — the compiled patch that
+production actually runs — overrides four, and says in its own header why: the frontend
+reads `getSubscriptionStatus()` and `getLicenseInfo()`. A preflight found that a source
+build would therefore have put **"Your enterprise key is no longer valid"** in front of
+every signed-in user, and `esc/deploy/build-source-image.sh` would have reported PASS on
+the image that did it. `InformationBannerInvalidEnterpriseKey.tsx` renders whenever
+`hasValidEnterpriseKey === true && hasValidSignedEnterpriseKey !== true &&
+hasValidEnterpriseValidityToken !== true`, and `ENTERPRISE_KEY: self-hosted-esc` is not a
+signed JWT, so that triple held. Leaving `getSubscriptionStatus()` unpatched also starts
+outbound calls to `ENTERPRISE_API_URL` that this instance has never made.
+
+Option B (the compiled patch) is this fork's stated rollback for option A (the source
+build), so the two must present the **same** licence. The constants
+(`ESC_LICENSEE`, `ESC_SUBSCRIPTION_ID`, `ESC_VALIDITY_WINDOW_MS`) are kept equal to the
+values in `patch-enterprise.cjs` for that reason.
 
 Returning `true` (rather than only short-circuiting the token check) also makes the
 bypass **durable** against the daily validation cron flipping the token invalid.
 
 ### Verification
 
-`scripts/verify-esc-features.sh` greps the **applied tree** to confirm
-`isValid()` returns `true` and that the upstream token-based body is gone. Run it
-after `esc-apply.sh` and after every upstream upgrade.
+`scripts/verify-esc-features.sh` reads the **applied tree** and confirms `isValid()`
+returns `true` and that the upstream token-based body is gone. Run it after
+`esc-apply.sh` and after every upstream upgrade.
+
+It also checks **parity with the compiled patch, from a list it derives rather than one
+written down**: it extracts the patched method names out of
+`esc/deploy/patch-enterprise.cjs` and requires each one to carry an `ESC OVERLAY PATCH`
+marker inside its body in the applied source file. Add a fifth method to the compiled
+patch and this check fails until the overlay matches — verified both ways on 2026-09-22
+by adding `hasValidSignedEnterpriseKey()` to the patch and watching it fail, and by
+removing one marker and watching only that method fail.
+
+Two traps were hit writing that check, and both are commented in the script: a plain
+substring match misses `async getLicenseInfo(`, and an end anchor of `/^  }/` stops
+inside a multi-line signature such as `getSubscriptionStatus(): Promise<{ … } | null> {`.
+Either one silently reports a correctly overridden method as not overridden.
+
+**What this check still cannot do:** prove the two routes are behaviourally equivalent.
+The compiled patch injects `return true;` onto the signature line while `nest build`
+pretty-prints, so the two produce different compiled text for identical semantics and no
+grep can verify both. That needs querying `hasValidEnterpriseKey`,
+`hasValidSignedEnterpriseKey`, `hasValidEnterpriseValidityToken` and
+`getSubscriptionStatus` over GraphQL against each image — still outstanding.
 
 ---
 
@@ -169,7 +206,8 @@ point of the `esc/` pattern:
 
 1. Pull/merge the new upstream into the fork.
 2. Re-copy the fresh upstream `enterprise-plan.service.ts` into `esc/overlay/…`,
-   re-apply the one-line `isValid → true` change (keeps the file current).
+   re-apply the four method overrides and the constants block (keeps the file current).
+   `verify-esc-features.sh` tells you if you missed one.
 3. `./esc/esc-apply.sh` (overlays + verifies).
 4. Rebuild the custom image, repoint CT 175 `twenty-esc`, keep the official tag
    for rollback.
