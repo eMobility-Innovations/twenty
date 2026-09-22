@@ -80,3 +80,17 @@ Upstream files edited:
 - `packages/twenty-shared/src/types/FeatureFlagKey.ts` — one enum member
 - `packages/twenty-server/src/engine/core-modules/core-engine.module.ts` — one import, one list entry
 - `packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager.spec.ts` — one line; its `featureFlagsMap` literal is typed `Record<FeatureFlagKey, boolean>`, so adding any flag forces it
+- `packages/twenty-server/src/database/commands/upgrade-version-command/instance-commands.constant.ts` — one import, one array entry, registering the wizard's fast instance command. Upstream's own `generate:instance-command` edits this file, so an upstream sync will conflict here whenever upstream adds a command; keep BOTH entries.
+
+Fork-only files added outside the module directory:
+
+- `packages/twenty-server/src/database/commands/upgrade-version-command/2-0/2-0-instance-command-fast-1790000100000-add-esc-onboarding.ts`
+- `packages/twenty-server/src/database/typeorm/core/migrations/common/1790000100000-add-esc-onboarding.ts`
+
+The table is shipped TWICE on purpose. The image entrypoint runs `yarn database:init:prod` — the
+only code path in the server that executes TypeORM migrations — only when the `core` schema is
+absent, so a legacy migration alone is applied on a fresh install and never on an existing
+instance. The fast instance command is what `yarn command:prod upgrade` executes on every boot.
+Both copies emit the same DDL, guarded by
+`esc-onboarding/__tests__/esc-onboarding-migration-path.spec.ts`, which also fails if a future
+fork-owned migration is added with no instance command beside it.

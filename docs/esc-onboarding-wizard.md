@@ -67,11 +67,13 @@ the admin-panel `upsertWorkspaceFeatureFlag` mutation, per workspace.
 
 ## Files this fork adds to upstream paths
 
-Everything is one directory apart from two single-line edits, which is what keeps an upstream merge
-survivable:
+Everything is one directory apart from four small edits to upstream files, which is what keeps an
+upstream merge survivable:
 
 - `packages/twenty-server/src/engine/core-modules/esc-onboarding/**` — the whole module
 - `packages/twenty-server/src/database/typeorm/core/migrations/common/1790000100000-add-esc-onboarding.ts`
+- `packages/twenty-server/src/database/commands/upgrade-version-command/2-0/2-0-instance-command-fast-1790000100000-add-esc-onboarding.ts` — the same table, as the instance command the production deploy path actually runs
+- `packages/twenty-server/src/database/commands/upgrade-version-command/instance-commands.constant.ts` — one import, one array entry
 - `packages/twenty-shared/src/types/FeatureFlagKey.ts` — one enum member added
 - `packages/twenty-server/src/engine/core-modules/core-engine.module.ts` — one import, one list entry
 - `packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager.spec.ts` — one line; its `featureFlagsMap` literal is typed `Record<FeatureFlagKey, boolean>`, so adding any flag forces it
@@ -81,5 +83,25 @@ survivable:
 ```bash
 npx nx typecheck twenty-server
 cd packages/twenty-server && npx jest esc-onboarding
-npx nx run twenty-server:database:migrate:prod   # applies the migration
 ```
+
+### Creating the table
+
+Do NOT run `npx nx run twenty-server:database:migrate:prod` against a deployed instance. `nx` is
+not installed in the production image (`ls /app/node_modules/.bin | grep -x nx` is empty), so that
+command attempts a network fetch on a production box — and it was never the mechanism that would
+have created the table anyway.
+
+The table is created by the fast instance command
+`2.0.0_AddEscOnboardingFastInstanceCommand_1790000100000`, which `yarn command:prod upgrade` runs
+on every boot of the image. The entrypoint already calls that, so a normal deploy applies it.
+
+Assert it afterwards rather than assuming — the failure is silent by construction:
+
+```sh
+DOCKER='sudo docker' esc/deploy/assert-esc-schema.sh
+```
+
+If a table ever has to be created by hand, the in-container command is
+`yarn database:migrate:prod` (i.e. `node dist/command/command run-instance-commands`) —
+never the `nx` form.

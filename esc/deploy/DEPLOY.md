@@ -104,3 +104,74 @@ confirmed in the database rather than from the UI.
 **The step cannot be created or edited through the API.** `createWorkflowVersionStep` answers an API
 key with `Forbidden resource` and the REST route refuses too ("Updating workflowVersion steps
 directly is forbidden"). Both need a signed-in user, so this workflow is maintained in the builder.
+
+---
+
+## 2026-09-22 — the wizard's table, and the migration step the entrypoint will never run
+
+Redmine [#19873](https://redmine.fiszu.com/issues/19873). Added after a preflight found that the
+self-onboarding wizard would have shipped **dead on arrival** with no boot-time symptom.
+
+**The fact this section exists for:** the image entrypoint runs `yarn database:init:prod` — the only
+code path in the server that executes TypeORM migrations — **only when the `core` schema is
+absent.** On CT175 it is not. Every other boot runs `yarn command:prod upgrade`, which builds its
+sequence purely from `@RegisteredInstanceCommand` / `@RegisteredWorkspaceCommand` bundles and never
+reaches TypeORM. Measured on production 2026-09-22: `core._typeorm_migrations` held 182 rows topping
+out at `1775909335324`, and `to_regclass('core."escOnboarding"')` was `NULL`.
+
+So the table now ships as a fast instance command as well as a legacy migration:
+`2.0.0_AddEscOnboardingFastInstanceCommand_1790000100000`. `command:prod upgrade` runs it, the
+entrypoint already calls that, and both copies emit the same DDL.
+
+### Numbered step of any deploy that carries the wizard
+
+1. Bring the new image up as usual — `docker compose up -d`, never `down`
+   (`twenty-ingest-app-1` shares `twenty-esc_default`).
+2. Wait for `/healthz` to return 200 through the public hostname.
+3. **Assert the schema. A deploy is not done until this exits 0:**
+
+   ```sh
+   DOCKER='sudo docker' /root/twenty-esc/esc/deploy/assert-esc-schema.sh
+   ```
+
+   It asserts two things, because either alone can lie: that `core."escOnboarding"` exists, and
+   that the instance command is recorded `completed` in `core."upgradeMigration"` with a NULL
+   `workspaceId`. A table that exists without that row was created by something other than the
+   upgrade path, and that is a finding, not a pass.
+
+4. If it fails, do **not** call the deploy done. Run the upgrade explicitly and re-assert:
+
+   ```sh
+   sudo docker exec twenty-esc-server-1 yarn command:prod upgrade
+   DOCKER='sudo docker' /root/twenty-esc/esc/deploy/assert-esc-schema.sh
+   ```
+
+**Never** `npx nx run twenty-server:database:migrate:prod` on a deployed box: `nx` is absent from
+the production image, so it attempts a network fetch. The in-container form is
+`yarn database:migrate:prod`.
+
+### What is proven, and what is not
+
+**Proven 2026-09-22, against a real Postgres 16** — `esc/deploy/prove-esc-ddl.ts`, which imports the
+shipped classes rather than a retyped copy of their SQL:
+
+```sh
+docker run -d --rm --name esc-ddl-proof -e POSTGRES_PASSWORD=proof -p 55432:5432 postgres:16
+cd packages/twenty-server && \
+  PGURL=postgres://postgres:proof@127.0.0.1:55432 npx tsx ../../esc/deploy/prove-esc-ddl.ts
+docker stop esc-ddl-proof
+```
+
+Both copies of the DDL execute on a database that already has a `core` schema, produce an identical
+column and index set, tolerate being run after each other and twice over, and `down()` removes the
+table and is safe to repeat. The script exits 1 when the two copies diverge — verified by changing
+one column type and watching it fail, then restoring it. Before this, neither copy had ever run
+against any database anywhere.
+
+**NOT proven:** that `yarn command:prod upgrade`, inside the real image, reaches the command on a
+database carrying CT175's `core."upgradeMigration"` rows. The unit suite asserts the command is in
+the sequence and sorts after the cursor production is parked on, but the sequence being walked in
+the running image is a different claim. That belongs to the boot smoke test against a restored
+production dump — next step 4 of
+[the preflight handover](../../docs/handovers/2026-09-22_cutover-incident-and-preflight.md) — and it
+must be done before the cutover, not after.
