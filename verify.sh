@@ -87,6 +87,61 @@ else
   echo "esc-onboarding:   dependencies installed (yarn install) to prove it." >&2
 fi
 
+echo "gate: the ESC tour must carry its own checks"
+
+# ---------------------------------------------------------------------------
+# The tour (Redmine #19873, scripts/PATCH_MANIFEST.md Category 3) is the fork's second
+# application-code delta, and unlike the wizard its code does NOT live at a normal package
+# path: it is added by `esc/new/` and one upstream file is overlaid. That is deliberate —
+# `esc/**` is what the fork-scope check below allows — but it means the suite cannot simply
+# be run where the files sit in a clean checkout. The overlay has to be applied first, which
+# WRITES INTO packages/. So this gate:
+#
+#   - refuses to touch a dirty tree, because restoring it afterwards would throw somebody's
+#     uncommitted work away;
+#   - applies, runs, and restores under a trap, so a failing test still puts the tree back;
+#   - fails if the tree is not clean afterwards, rather than leaving the mess for the next
+#     command to trip over.
+#
+# The suite holds the properties that make the tour survivable across an upstream sync: a
+# step whose anchor is missing is skipped and named (mutation-tested — remove the guard in
+# selectShowableEscTourSteps and the test fails), and no step may anchor on a generated
+# class name.
+#
+# SKIPS LOUDLY, BY NAME, WHEN IT CANNOT RUN — same discriminator as the gates either side.
+if [ ! -d node_modules ]; then
+  echo "esc-tour: SKIPPED — node_modules is absent in this checkout, so the suite" >&2
+  echo "esc-tour:   cannot be run by anyone from here. THIS RUN DID NOT CHECK THE TOUR." >&2
+  echo "esc-tour:   Run ./verify.sh on a clone with dependencies installed." >&2
+elif [ -n "$(git status --porcelain -- packages/ 2>/dev/null)" ]; then
+  echo "esc-tour: SKIPPED — packages/ has uncommitted changes, and this gate has to" >&2
+  echo "esc-tour:   apply the overlay into packages/ and then restore it. Restoring over" >&2
+  echo "esc-tour:   your work would delete it. THIS RUN DID NOT CHECK THE TOUR." >&2
+  echo "esc-tour:   Commit or stash packages/ and run ./verify.sh again." >&2
+else
+  esc_tour_restore() {
+    git checkout -- packages/ 2>/dev/null || true
+    git clean -fdq packages/twenty-front/src/modules/esc-tour 2>/dev/null || true
+    rm -rf .esc-originals
+  }
+  trap esc_tour_restore EXIT
+
+  ./esc/esc-apply.sh --no-verify >/dev/null
+  (cd packages/twenty-front && npx jest esc-tour --config=jest.config.mjs)
+
+  esc_tour_restore
+  trap - EXIT
+
+  if [ -n "$(git status --porcelain -- packages/ 2>/dev/null)" ]; then
+    echo "esc-tour: the tree was NOT restored after applying the overlay:" >&2
+    git status --porcelain -- packages/ | sed 's/^/    /' >&2
+    echo "  Restore it by hand before pushing — the overlay belongs in esc/, not packages/." >&2
+    exit 1
+  fi
+
+  echo "esc-tour: the tour suite passed and the tree was restored."
+fi
+
 echo "gate: org-specific application changes must have targeted checks"
 
 # ---------------------------------------------------------------------------
