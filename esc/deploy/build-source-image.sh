@@ -144,9 +144,45 @@ check_in_image() { # description, path, needle
   fi
 }
 
-check_in_image "enterprise gate bypassed" \
-  "${DIST}/engine/core-modules/enterprise/services/enterprise-plan.service.js" \
-  "return true"
+# 🔧 REPLACED 2026-09-22. This used to be:
+#
+#   check_in_image "enterprise gate bypassed" …/enterprise-plan.service.js "return true"
+#
+# and it COULD NOT FAIL. `return true` appears in that compiled file twice in upstream
+# code alone, so the check passed on any image — including one with no enterprise patch
+# at all. It was the build's most important check and it asserted nothing. (The day
+# before, the same function had the opposite bug: a pipefail/SIGPIPE false NEGATIVE,
+# fixed in PR #21. The check has now been wrong in both directions.)
+#
+# There is no grep that can replace it, and that is not a limitation of this script.
+# Option B regex-injects `return true;` onto the signature line of the compiled file;
+# option A builds from source and `nest build` pretty-prints. The two routes produce
+# DIFFERENT COMPILED TEXT FOR IDENTICAL SEMANTICS. Any anchor tight enough to prove
+# option B fails on a correct option A image, and any anchor loose enough to accept
+# both accepts an unpatched image too.
+#
+# So the image is asked what it returns. The probe runs the four enterprise methods
+# inside the image with --network none, so the answer owes nothing to a licensing
+# server and an unpatched getSubscriptionStatus() cannot reach one.
+ENTERPRISE_PROBE="${REPO_ROOT}/esc/deploy/enterprise-behaviour-probe.cjs"
+ALL_VALID='ESC_ENTERPRISE_VERDICT: isValid=true hasValidEnterpriseValidityToken=true licenceIsValid=true subscriptionActive=true'
+
+if [ ! -f "${ENTERPRISE_PROBE}" ]; then
+  echo "  FAIL enterprise behaviour probe missing at ${ENTERPRISE_PROBE}"
+  FAIL=$((FAIL + 1))
+else
+  ENTERPRISE_REPORT="$(docker run --rm -i --network none --memory 512m \
+    --entrypoint node "${IMAGE_TAG}" - < "${ENTERPRISE_PROBE}" 2>/dev/null || true)"
+  ENTERPRISE_VERDICT="$(printf '%s\n' "${ENTERPRISE_REPORT}" | grep '^ESC_ENTERPRISE_VERDICT:' || true)"
+
+  if [ "${ENTERPRISE_VERDICT}" = "${ALL_VALID}" ]; then
+    echo "  PASS enterprise reports valid on all four methods (executed, not grepped)"
+  else
+    echo "  FAIL enterprise does NOT report valid on all four methods"
+    [ -n "${ENTERPRISE_REPORT}" ] && printf '%s\n' "${ENTERPRISE_REPORT}" | sed 's/^/       /'
+    FAIL=$((FAIL + 1))
+  fi
+fi
 
 check_in_image "SSRF allowlist present" \
   "${DIST}/engine/core-modules/secure-http-client/utils/is-private-ip.util.js" \
@@ -159,6 +195,31 @@ check_in_image "onboarding wizard module compiled in" \
 if [ "${FAIL}" -gt 0 ]; then
   echo "build-source-image: the image is MISSING ${FAIL} ESC feature(s). Do not deploy it." >&2
   exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# AND NOW BOOT IT. Everything above this line inspects a filesystem; none of it
+# starts a server. That is exactly how a Nest DI fault shipped on 2026-09-21 with
+# five green checks behind it and took the CRM down for 16h41m.
+# ---------------------------------------------------------------------------
+BOOT_SMOKE="${REPO_ROOT}/esc/deploy/boot-smoke-test.sh"
+
+if [ "${SKIP_BOOT_SMOKE:-0}" = "1" ]; then
+  echo
+  echo "build-source-image: SKIPPED the boot smoke test (SKIP_BOOT_SMOKE=1)." >&2
+  echo "build-source-image:   THIS IMAGE HAS NOT BEEN BOOTED. It is not deployable on" >&2
+  echo "build-source-image:   the strength of this run. A skip nobody can see is how a" >&2
+  echo "build-source-image:   gate becomes a green-looking absence of one." >&2
+elif [ ! -x "${BOOT_SMOKE}" ]; then
+  echo "build-source-image: boot-smoke-test.sh missing or not executable at ${BOOT_SMOKE}" >&2
+  exit 1
+else
+  echo
+  echo "==> Booting ${IMAGE_TAG} before calling it good"
+  "${BOOT_SMOKE}" "${IMAGE_TAG}" || {
+    echo "build-source-image: the image does not boot. Do not deploy it." >&2
+    exit 1
+  }
 fi
 
 echo

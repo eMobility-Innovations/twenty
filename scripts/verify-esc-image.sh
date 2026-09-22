@@ -24,8 +24,39 @@ check() { # name, command
 
 echo "ESC Twenty image verification — container ${CONTAINER}"
 
-check "enterprise gate bypassed (isValid returns true)" \
-  "docker exec ${CONTAINER} grep -q 'isValid() { return true;' ${DIST}/engine/core-modules/enterprise/services/enterprise-plan.service.js"
+# 🔧 REPLACED 2026-09-22, and the old check was wrong in a way that only bit on the
+# day it mattered. It was:
+#
+#   docker exec ${CONTAINER} grep -q 'isValid() { return true;' …/enterprise-plan.service.js
+#
+# That one-line shape exists ONLY because option B regex-injects `return true;` onto
+# the signature line of the compiled file. `nest build` pretty-prints, so an option-A
+# SOURCE build emits the same semantics across three lines — and this check would have
+# FAILED on a correct source image, on the cutover it was meant to protect. Its sibling
+# in esc/deploy/build-source-image.sh had the opposite bug: it grepped the whole file
+# for `return true`, a string upstream already ships twice, so it could not fail at all.
+#
+# The two routes produce different compiled text for identical semantics, so no grep
+# can serve both. Ask the code what it returns instead.
+ENTERPRISE_PROBE="$(cd "$(dirname "$0")/.." && pwd)/esc/deploy/enterprise-behaviour-probe.cjs"
+
+if [ ! -f "${ENTERPRISE_PROBE}" ]; then
+  echo "  FAIL enterprise behaviour probe missing at ${ENTERPRISE_PROBE}"
+  FAIL=$((FAIL+1))
+else
+  ENTERPRISE_REPORT="$(docker exec -i "${CONTAINER}" node - < "${ENTERPRISE_PROBE}" 2>/dev/null || true)"
+  ENTERPRISE_VERDICT="$(printf '%s\n' "${ENTERPRISE_REPORT}" | grep '^ESC_ENTERPRISE_VERDICT:' || true)"
+  ALL_VALID='ESC_ENTERPRISE_VERDICT: isValid=true hasValidEnterpriseValidityToken=true licenceIsValid=true subscriptionActive=true'
+
+  if [ "${ENTERPRISE_VERDICT}" = "${ALL_VALID}" ]; then
+    echo "  PASS enterprise reports valid on all four methods (executed, not grepped)"
+    PASS=$((PASS+1))
+  else
+    echo "  FAIL enterprise does NOT report valid on all four methods — every signed-in user would see the invalid-key banner"
+    [ -n "${ENTERPRISE_REPORT}" ] && printf '%s\n' "${ENTERPRISE_REPORT}" | sed 's/^/       /'
+    FAIL=$((FAIL+1))
+  fi
+fi
 
 check "SSRF allowlist present in isPrivateIp" \
   "docker exec ${CONTAINER} grep -q 'ESC_SSRF_ALLOWED_HOSTS' ${DIST}/engine/core-modules/secure-http-client/utils/is-private-ip.util.js"
