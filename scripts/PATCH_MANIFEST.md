@@ -11,7 +11,7 @@ upstream checkout (backing up originals to `.esc-originals/`); re-running
 - **Branch:** `esc/enterprise-sso-overlay`
 - **Upstream base:** `eMobility-Innovations/twenty` @ `emobility-unity` (a fork of
   `twentyhq/twenty`), Twenty **v2.0.x** line.
-- **Last updated:** 2026-09-09
+- **Last updated:** 2026-09-23
 - **Status:** LIVE. Option B (compiled patches on the official image) is what runs on
   CT 175 as `twenty-esc-sso:*`. The "scaffold only, image NOT yet built" line that stood
   here was true on 2026-06-04 and wrong from 2026-06-05 onward — the image was built and
@@ -22,7 +22,7 @@ upstream checkout (backing up originals to `.esc-originals/`); re-running
 ## Overview
 
 ESC runs a self-hosted Twenty instance (`esc.crm.fiszu.com`, CT 175 stack
-`twenty-esc`). On Twenty **v2.0** the only customization we need is **one**:
+`twenty-esc`). On Twenty **v2.0** the fork carries **three** customizations, no more:
 
 1. **Enterprise feature unlocking (SSO)** — remove the Organization-license gate
    so SAML / generic-OIDC SSO (our **Keycloak** `fiszu` realm) and the SSO settings
@@ -42,6 +42,10 @@ ESC runs a self-hosted Twenty instance (`esc.crm.fiszu.com`, CT 175 stack
    ONE customer's interest profile by calling `twenty-ingest` on CT 175. The alternative
    was publishing that endpoint on the public internet, a larger exposure than naming one
    host here.
+
+3. **A guided tour** — a "Tour" entry in the CRM sidebar that walks a new person through
+   the product (Redmine #19873). One upstream file overlaid, everything else in ESC-owned
+   code under `esc/new/`. Category 3 below.
 
 That is the entire patch surface today. Everything else is upstream-stock.
 
@@ -180,7 +184,170 @@ behaves differently from the thing you tested.
 - Built image: `scripts/verify-esc-image.sh`, which greps the compiled `dist/`.
 - Live: a workflow step calling the allowlisted host must succeed. Nothing short of that proves it.
 
-## Category 3: base image pinned by digest
+## Category 3: The guided tour ("Tour" in the sidebar)
+
+Redmine [#19873](https://redmine.fiszu.com/issues/19873). Added 2026-09-22 after the operator
+replaced the stored-state onboarding wizard with a button anyone can press at any time:
+
+> "we can skip the database table and the flags of who is onboarded and who's not and we can
+> easily do a button in the sidebar of Twenty CRM and when people click on it, it walks them
+> through the onboarding"
+
+That decision deleted the largest obstacle in front of the next cutover along with the
+feature it belonged to. The wizard needed `core."escOnboarding"`, and the image entrypoint
+runs TypeORM migrations **only when the `core` schema is absent**, which on CT175 it is not —
+so the table would have shipped dead with no boot-time symptom. With no table there is
+nothing for the migration path to fail to run.
+
+### Why this patch exists
+
+There is no upstream extension point for a sidebar entry. Twenty's navigation drawer renders a
+fixed set of items in `NavigationDrawerOtherSection`, and nothing reads a registry, a plugin
+list or a config key to add one. So one upstream file is overlaid — and exactly one.
+
+### The patch (single file, single element)
+
+`packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx`
+
+One import and one element, placed first in the "Other" section so somebody who has never
+seen the product finds it without being told where to look. The diff against upstream is two
+hunks and touches nothing else in the file.
+
+Everything the tour actually is lives in ESC-owned code that upstream has never seen, added
+by `esc/new/` rather than overlaid:
+
+`packages/twenty-front/src/modules/esc-tour/` — the controller hook, the spotlight/popover
+overlay, the anchor resolver, the placement maths and the script.
+
+Four properties are part of the contract, not details:
+
+- **No new npm dependency.** A tour library (driver.js and friends) would mean a permanent
+  `package.json` and `yarn.lock` divergence to reconcile on every upstream sync, and neither
+  file is allowlisted by `verify.sh`'s fork-scope check. The overlay is only survivable
+  because it is small.
+- **Anchors are ROUTES, never class names.** A step points at `a[href="/objects/people"]`. A
+  route is part of the product; a linaria hash is an artefact of the build and changes
+  without anybody deciding that it should. `escTourSteps.test.ts` fails if an anchor ever
+  starts with a class selector.
+- **A missing anchor skips its step, and says so.** `selectShowableEscTourSteps` resolves the
+  script once when the tour opens, drops the steps whose target is not on the page, and
+  returns their ids, which are logged by name. Without this a renamed route makes the tour
+  quietly shorter, which looks exactly like a tour that is working.
+- **The tour changes no data.** It reads the DOM and paints over it. There is no mutation, no
+  API call, and no record of who has taken it — by the operator's decision above.
+- **It owns its CSS instead of using linaria**, which is what the rest of twenty-front uses.
+  Linaria is a build-time transform: `styled.div` only works because a bundler plugin has
+  already replaced it, and twenty-front's jest config carries no linaria transform — so a
+  component built from `@linaria/react` cannot be rendered in a unit test at all. That would
+  leave the overlay, the part a person actually sees, permanently untestable. The overlay
+  lives in a portal on `document.body` and shares no tokens or stacking context with the
+  product's surfaces, so it loses nothing by injecting its own stylesheet once, by id.
+
+### Delivery: a FRONT-ONLY image layer
+
+`esc/deploy/Dockerfile.front-layer` + `esc/deploy/build-front-layer.sh`.
+
+The frontend is rebuilt from this checkout with the overlay applied, and laid over an
+existing ESC image as a single `COPY` into `/app/packages/twenty-server/dist/front`. **The
+server binary is not recompiled**, so the Nest dependency-injection failure that took the CRM
+down for 16h41m on 2026-09-21 cannot be reintroduced by this image, and the two compiled
+server patches above are inherited from the base rather than re-applied.
+
+Two facts make it safe, both measured rather than assumed:
+
+- `packages/twenty-front` is **byte-identical** between upstream `v2.0.0` and this fork's
+  trunk (`git diff v2.0.0..HEAD -- packages/twenty-front` is empty), so the rebuilt bundle is
+  the one production already serves, plus the tour.
+- The server serves the front as plain static files through NestJS `ServeStaticModule` with
+  `rootPath` `dist/front`. No asset manifest, no integrity check, no CSP pinning script
+  hashes — replacing the directory as one unit is the whole operation.
+
+`REACT_APP_SERVER_BASE_URL` is compiled into the bundle by vite. A bundle built with the
+wrong value points the browser at the wrong API host and nothing in the image says so, which
+is why `build-front-layer.sh` refuses to run without it.
+
+`BASE_IMAGE` must be an **ESC** image. A layer built over a bare `twentycrm/twenty:v2.0.0`
+would silently lose both server patches; `scripts/verify-esc-image.sh` is the check that
+catches it, and step 3 of the deploy runs it.
+
+### Verification
+
+```bash
+# after building, against the image
+./scripts/verify-esc-tour.sh --image twenty-esc-sso:v2.0.0-tour1
+
+# after deploying, against what is running
+./scripts/verify-esc-tour.sh --container twenty-esc-server-1
+CONTAINER=twenty-esc-server-1 ./scripts/verify-esc-image.sh
+```
+
+`verify-esc-tour.sh` proves the tour is PRESENT in the served bundle and that `index.html`
+and its hashed assets came from the same build. **It cannot prove the tour RUNS**, and
+nothing that greps a bundle can. A person clicking Tour in a browser is the proof, and it is
+a numbered step of the deploy in `esc/deploy/DEPLOY.md`.
+
+### The gate that guards the overlaid file
+
+Two checks in `verify.sh` stand behind Category 3, and they answer different failures:
+
+1. **The overlay-orphan check** (`gate: the ESC overlay must still line up with upstream`).
+   `esc-apply.sh` cannot tell a rename from a new file: when an upstream sync MOVES or
+   DELETES `NavigationDrawerOtherSection.tsx`, the overlay copy still applies — to a path
+   nothing reads any more, and the build succeeds with no Tour button in it. The check is a
+   pure path-existence test, so it runs anywhere a checkout does, and it turns that silent
+   loss into a refused push.
+
+2. **The `esc-tour` gate** (`gate: the ESC tour must carry its own checks`). It runs the
+   module's six jest suites. Because the tour's code does not sit at a normal package path —
+   `esc/new/` adds it and one upstream file is overlaid — the suite cannot be run where the
+   files sit, so the gate has to apply the overlay INTO `packages/` first. It therefore:
+   refuses on a tree with uncommitted changes under `packages/` (restoring would delete
+   somebody's work); applies, runs and restores under a `trap`, so a failing test still puts
+   the tree back; and fails if `packages/` is not clean afterwards rather than leaving the
+   mess for the next command.
+
+   **It used to be a gate that could not run.** No checkout carries twenty-front's
+   dependencies and the shared gate runner does not install them, so it skipped on every host
+   it had ever run on. It now runs the suite inside the front-build image
+   (`ESC_TOUR_RUNNER_IMAGE`, default `esc-front-build:tour2`) when `node_modules` is absent,
+   bind-mounting the working tree's tour sources and the overlaid file over the image's baked
+   copies — so what is checked is what you are about to push, not what was compiled weeks ago.
+   With neither dependencies nor the image it skips **loudly, by name**, saying in the same
+   breath how to build the image.
+
+The suite holds the properties above as tests, not as intentions: a step whose anchor is
+missing is skipped and named (mutation-tested — remove the guard in
+`selectShowableEscTourSteps` and the test fails), and no step may anchor on a generated class
+name.
+
+### Maintenance cost of this category
+
+One overlaid file is the whole recurring bill, and it is a **frontend** file, which behaves
+differently from the two server patches above:
+
+- On every upstream sync, re-copy the fresh upstream `NavigationDrawerOtherSection.tsx` into
+  `esc/overlay/…` and re-apply the two hunks (one import, one `<EscTourNavigationDrawerItem />`
+  placed first in the section). Do not carry the old copy forward — that is how a fork silently
+  reverts an upstream fix to the navigation drawer.
+- If upstream moves or renames the file, the overlay-orphan check refuses the push. Re-point
+  the overlay at the new path, update `scripts/esc-modified-files.txt`, and say so here.
+- If upstream ever grows a real extension point for sidebar entries, **delete this overlay and
+  use it.** The overlay exists only because none exists today.
+- `esc/new/**` costs nothing at sync time: upstream has never seen those paths, so there is
+  nothing to reconcile. Keeping the tour's own code there, and the overlay down to one file, is
+  the entire reason this category is survivable.
+- **No new npm dependency, ever.** `package.json` and `yarn.lock` are not allowlisted by
+  `verify.sh`'s fork-scope check; a tour library would put a permanent divergence in both.
+
+### State
+
+Built and gated in this repo. Delivered as the front-only layer
+`twenty-esc-sso:v2.0.0-tour1` over `twenty-esc-sso:v2.0.0-ssrf1`; the deploy, and the rollback
+tarball that backs it, are in `esc/deploy/DEPLOY.md`, section *2026-09-22c*.
+
+---
+
+## Category 4: base image pinned by digest
 
 ### Why this patch exists
 
@@ -265,7 +432,8 @@ Do **not** touch the separate `twenty-rc` (v1.17) stack on CT 175 — only `twen
 
 ## File index
 
-- `esc/overlay/` — patched upstream files (mirror upstream paths). Currently one file.
+- `esc/overlay/` — patched upstream files (mirror upstream paths). Currently THREE files;
+  `scripts/esc-modified-files.txt` is the flat list and must match this directory exactly.
 - `esc/esc-apply.sh` — overlay installer / re-apply-after-upgrade.
 - `scripts/verify-esc-features.sh` — post-apply verification.
 - `scripts/esc-modified-files.txt` — flat list of touched upstream files.

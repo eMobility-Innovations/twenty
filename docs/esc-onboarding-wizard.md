@@ -1,107 +1,169 @@
-# ESC self-onboarding wizard
+# The ESC guided tour ("Tour" in the CRM sidebar)
 
-Redmine [#19873](https://redmine.fiszu.com/issues/19873). An in-product wizard that walks every
-person through the CRM once, on screen, and remembers where they got to.
+Redmine [#19873](https://redmine.fiszu.com/issues/19873).
 
-**It is off.** The wizard is behind the workspace feature flag
-`IS_ESC_ONBOARDING_WIZARD_ENABLED`, which has no row anywhere, so it reads `false` for every
-workspace. Nothing renders and no mutation is reachable until somebody turns it on deliberately.
-That state is held by tests, not by good intentions — see *Staying off*, below.
+> The filename says *wizard* for history's sake. The thing that ships is a **tour**. What the
+> wizard was, and why it was dropped, is recorded at the bottom — the reasoning is worth keeping.
 
-## What is built so far
+## What ships
 
-| Ticket | What | State |
-|--------|------|-------|
-| W1 | `core.escOnboarding` table + migration, keyed on the Keycloak `sub` | built |
-| W2 | A row is provisioned on the first authenticated request, idempotently | built |
-| W3 | Step-level progress, so a refresh resumes instead of restarting | built |
-| W4 | `scriptVersion` + forced replay after a release | built |
-| W5 | API: read own state, advance a step, complete, reset | built |
-| W6 | Admin: reset one user, reset everyone left on an older script | built |
-| W7–W19 | The front end (spotlight, anchors, interaction lock, scripts, telemetry, watchdog) | not started |
+A **Tour** entry at the top of the "Other" section of the Twenty CRM sidebar. Anybody can press
+it, at any time, as often as they like. Pressing it darkens the page, puts a spotlight on one
+thing at a time and a popover beside it explaining what that thing is for, and walks forward
+through a short script until the person closes it or reaches the end.
 
-Nothing here has been run against a database yet, and nothing is deployed.
+Nine steps, in this order (`esc/new/packages/twenty-front/src/modules/esc-tour/constants/escTourSteps.ts`):
 
-## The identity key, and why it is awkward
+| # | Step | What it points at |
+|---|------|-------------------|
+| 1 | Welcome to the CRM | nothing — centred, no anchor |
+| 2 | Everything starts here | the sidebar itself |
+| 3 | People | `a[href="/objects/people"]` |
+| 4 | Companies | `a[href="/objects/companies"]` |
+| 5 | Orders | `a[href="/objects/orders"]` |
+| 6 | Repairs | `a[href="/objects/repairs"]` |
+| 7 | Interactions | `a[href="/objects/interactions"]` |
+| 8 | Tasks | `a[href="/objects/tasks"]` |
+| 9 | That is the tour | nothing — centred, no anchor |
 
-The ticket locks the key to the Keycloak `sub`, because an email key breaks the day someone's
-address changes — the `@remotecrew.co.uk` → `@rc.fiszu.com` contractor migration did exactly that
-to a join in `sling-sync`.
+The copy is data, not JSX, so a wording change is a one-line edit to a plain string.
 
-Twenty does not make that easy. It matches an SSO login to an account **by email**
-(`auth-sso.service.ts` → `userService.findUserByEmail`) and keeps no column for the
-identity-provider subject. It does store the whole claims object, as JSONB, on the connected
-account it creates at sign-in (`core.connectedAccount.oidcTokenClaims`).
+## What it deliberately does NOT do
 
-So `EscOnboardingIdentityService` digs the `sub` back out of that blob. A user who has never
-signed in through Keycloak — a password login, a dev seed — has no claims at all, and is given a
-namespaced synthetic subject `local:<userId>` rather than being refused a row. A real Keycloak
-subject can never collide with that prefix.
+Operator decision, 2026-09-22:
 
-The email is stored beside it as a display label and is refreshed when it changes. It is never
-joined on.
+> "we can skip the database table and the flags of who is onboarded and who's not and we can
+> easily do a button in the sidebar of Twenty CRM and when people click on it, it walks them
+> through the onboarding"
 
-## The table
+So, concretely:
 
-`core.escOnboarding`, primary key `keycloakSub`, with a unique index on `userId` — the request
-carries a Twenty user id, so that is the lookup, while the key stays the stable identity.
+- **No database table.** Nothing is created, migrated or read.
+- **No per-user flags.** Nobody is "onboarded" or "not onboarded".
+- **No record of who took it**, when, or how far they got. No telemetry, no mutation, no API
+  call. The tour reads the DOM and paints over it, and that is all it does.
+- **No feature flag.** It is on for everyone the moment the image is deployed. There is nothing
+  to turn on.
 
-## Forced replay after a release
+The consequence is worth stating plainly: nobody can ever report on tour completion, because
+that fact is not stored anywhere. If that is ever wanted it is new work, not a setting.
 
-`ESC_ONBOARDING_SCRIPT_VERSION` lives in code. A row whose `scriptVersion` is below it reads as
-not-onboarded, so bumping the constant replays the wizard for everyone on their next visit without
-a data migration. `resetEscOnboardingForEveryone` does the same eagerly.
+## Where the code lives
 
-## Staying off
+ESC-owned code, which upstream has never seen, added by `esc/new/` and copied into `packages/`
+at build time by `esc/esc-apply.sh`:
 
-`FeatureFlagService.isFeatureEnabled` returns `false` for a key with no row, so "off for everyone"
-holds exactly as long as nothing writes a row by itself. Three things could:
-
-- `DEFAULT_FEATURE_FLAGS` — written at workspace creation
-- `PUBLIC_FEATURE_FLAGS` — makes a flag self-enablable from Settings → Lab
-- the dev seeder — writes rows per seeded workspace
-
-The flag is in none of them, and `esc-onboarding/__tests__/esc-onboarding-off-by-default.spec.ts`
-fails if it is ever added to any of them. Turning the wizard on is therefore a deliberate act:
-the admin-panel `upsertWorkspaceFeatureFlag` mutation, per workspace.
-
-## Files this fork adds to upstream paths
-
-Everything is one directory apart from four small edits to upstream files, which is what keeps an
-upstream merge survivable:
-
-- `packages/twenty-server/src/engine/core-modules/esc-onboarding/**` — the whole module
-- `packages/twenty-server/src/database/typeorm/core/migrations/common/1790000100000-add-esc-onboarding.ts`
-- `packages/twenty-server/src/database/commands/upgrade-version-command/2-0/2-0-instance-command-fast-1790000100000-add-esc-onboarding.ts` — the same table, as the instance command the production deploy path actually runs
-- `packages/twenty-server/src/database/commands/upgrade-version-command/instance-commands.constant.ts` — one import, one array entry
-- `packages/twenty-shared/src/types/FeatureFlagKey.ts` — one enum member added
-- `packages/twenty-server/src/engine/core-modules/core-engine.module.ts` — one import, one list entry
-- `packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager.spec.ts` — one line; its `featureFlagsMap` literal is typed `Record<FeatureFlagKey, boolean>`, so adding any flag forces it
-
-## Running it
-
-```bash
-npx nx typecheck twenty-server
-cd packages/twenty-server && npx jest esc-onboarding
+```
+packages/twenty-front/src/modules/esc-tour/
+├── components/EscTourNavigationDrawerItem.tsx   the sidebar button
+├── components/EscTourOverlay.tsx                the spotlight + popover
+├── constants/escTourSteps.ts                    the script (the table above)
+├── constants/escTourStylesheet.ts               the overlay's own CSS
+├── hooks/useEscTour.ts                          the controller
+├── types/EscTourStep.ts
+├── utils/computeEscTourPlacement.ts             where the popover goes
+├── utils/resolveEscTourAnchor.ts                finding a step's target in the DOM
+└── __tests__/                                   six suites, jest + @testing-library/react
 ```
 
-### Creating the table
+Exactly **one** upstream file is overlaid, because Twenty has no extension point for a sidebar
+entry — `NavigationDrawerOtherSection` renders a fixed list and nothing reads a registry:
 
-Do NOT run `npx nx run twenty-server:database:migrate:prod` against a deployed instance. `nx` is
-not installed in the production image (`ls /app/node_modules/.bin | grep -x nx` is empty), so that
-command attempts a network fetch on a production box — and it was never the mechanism that would
-have created the table anyway.
-
-The table is created by the fast instance command
-`2.0.0_AddEscOnboardingFastInstanceCommand_1790000100000`, which `yarn command:prod upgrade` runs
-on every boot of the image. The entrypoint already calls that, so a normal deploy applies it.
-
-Assert it afterwards rather than assuming — the failure is silent by construction:
-
-```sh
-DOCKER='sudo docker' esc/deploy/assert-esc-schema.sh
+```
+esc/overlay/packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx
 ```
 
-If a table ever has to be created by hand, the in-container command is
-`yarn database:migrate:prod` (i.e. `node dist/command/command run-instance-commands`) —
-never the `nx` form.
+One import, one element. Two hunks against upstream, nothing else in the file touched.
+
+## The five properties that are contract, not detail
+
+1. **No new npm dependency.** Not one. A tour library would mean a permanent `package.json` and
+   `yarn.lock` divergence to reconcile on every upstream sync, and neither file is allowlisted
+   by `verify.sh`'s fork-scope check.
+2. **Anchors are ROUTES, never generated class names.** A linaria hash is an artefact of the
+   build and changes without anybody deciding it should. `escTourSteps.test.ts` fails if an
+   anchor ever starts with a class selector.
+3. **A missing anchor skips its step, and says so by name.** `selectShowableEscTourSteps`
+   resolves the script once when the tour opens, drops the steps whose target is not on the
+   page, and returns their ids to be logged. Without this a renamed route makes the tour
+   quietly shorter, which looks exactly like a tour that works.
+4. **The tour changes no data.** No mutation, no API call, nothing recorded.
+5. **It owns its CSS rather than using linaria.** Linaria is a build-time transform — a
+   component built from `@linaria/react` cannot be rendered in a unit test at all, because
+   twenty-front's jest config carries no linaria transform. Using it would leave the overlay,
+   the part a person actually sees, permanently untestable. The overlay lives in a portal on
+   `document.body` and shares no tokens or stacking context with the product's surfaces, so it
+   loses nothing by injecting one stylesheet, once, by id.
+
+Animation stays on `transform`, `opacity` and `clip-path`. No width/height/top/left animation.
+
+## How it is delivered
+
+A **front-only image layer**: the frontend is rebuilt from this checkout with the overlay
+applied and laid over the existing ESC image as a single `COPY` into
+`/app/packages/twenty-server/dist/front`. **The server binary is not recompiled** — it is
+inherited from the base image, so the enterprise bypass and the SSRF allowlist come along
+untouched, and the Nest dependency-injection fault that took the CRM down for 16h41m on
+2026-09-21 cannot be reintroduced by this image.
+
+Full procedure, with the exact commands: **[`esc/deploy/DEPLOY.md`](../esc/deploy/DEPLOY.md)**,
+section *2026-09-22c*. Patch rationale: **[`scripts/PATCH_MANIFEST.md`](../scripts/PATCH_MANIFEST.md)**,
+Category 3.
+
+## Checks
+
+| Check | What it proves |
+|---|---|
+| `./verify.sh` (gate `esc-tour`) | the tour suite passes and the overlay was restored out of `packages/` |
+| `./scripts/verify-esc-tour.sh --image <tag>` | the compiled tour is in the bundle the image serves |
+| `./scripts/verify-esc-tour.sh --container twenty-esc-server-1` | the same, against what is running |
+| a person clicking **Tour** in a browser | that it *runs* — nothing that greps a bundle can prove this |
+
+The `esc-tour` gate in `verify.sh` has to apply the overlay into `packages/` to run the suite,
+so it refuses on a dirty tree, restores under a trap, and fails if the tree is not clean
+afterwards. With no `node_modules` it runs the suite inside the front-build image
+(`esc-front-build:tour2` by default) rather than skipping — no checkout carries twenty-front's
+dependencies and the shared gate runner does not install them, so before that it had skipped on
+every host it had ever run on.
+
+---
+
+## What the design WAS, and why it was replaced
+
+Until 2026-09-22 this was a stored-state wizard: a `core."escOnboarding"` table keyed on the
+Keycloak `sub`, a row provisioned on first authenticated request, step-level progress so a
+refresh resumed instead of restarting, a `scriptVersion` that forced a replay after a release,
+an API to read/advance/complete/reset, and an admin reset. That was W1–W6 of the ticket.
+
+**Why it was dropped — the part worth keeping.** A preflight on 2026-09-22 found the table would
+have shipped **dead on arrival, with no boot-time symptom**. The image entrypoint runs
+`yarn database:init:prod` — the only code path in the server that executes TypeORM migrations —
+**only when the `core` schema is absent.** On CT175 it is not. Every other boot runs
+`yarn command:prod upgrade`, which builds its sequence purely from `@RegisteredInstanceCommand` /
+`@RegisteredWorkspaceCommand` bundles and never reaches TypeORM. Measured on production that day:
+`core._typeorm_migrations` held 182 rows topping out at `1775909335324`, and
+`to_regclass('core."escOnboarding"')` was `NULL`.
+
+That was fixable — the table was re-shipped as a fast instance command as well — but it made the
+cutover the largest obstacle in front of the feature. The operator's answer removed the obstacle
+by removing the feature it belonged to: with no table there is nothing for the migration path to
+fail to run.
+
+**The W1–W6 backend code is still on the trunk.** It was not reverted. It is unused and
+unreachable: it sits behind the workspace feature flag `IS_ESC_ONBOARDING_WIZARD_ENABLED`, which
+has no row anywhere, so `FeatureFlagService.isFeatureEnabled` reads `false` for every workspace.
+Three things could write such a row by themselves — `DEFAULT_FEATURE_FLAGS`,
+`PUBLIC_FEATURE_FLAGS` and the dev seeder — the flag is in none of them, and
+`esc-onboarding/__tests__/esc-onboarding-off-by-default.spec.ts` fails if it is ever added to
+any of them. Turning it on would be a deliberate act: the admin-panel
+`upsertWorkspaceFeatureFlag` mutation, per workspace.
+
+Two smaller facts from that work, kept because they will otherwise be rediscovered the hard way:
+
+- Twenty matches an SSO login to an account **by email** and keeps no column for the
+  identity-provider subject. The wizard dug the `sub` out of `core.connectedAccount.oidcTokenClaims`
+  (JSONB) and gave a user who had never signed in through Keycloak a namespaced synthetic
+  `local:<userId>`.
+- Never run `npx nx run twenty-server:database:migrate:prod` against a deployed instance: `nx` is
+  absent from the production image, so it attempts a network fetch on a production box. The
+  in-container form is `yarn database:migrate:prod`.

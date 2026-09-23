@@ -101,6 +101,111 @@ else
   echo "esc-onboarding:   dependencies installed (yarn install) to prove it." >&2
 fi
 
+echo "gate: the ESC tour must carry its own checks"
+
+# ---------------------------------------------------------------------------
+# The tour (Redmine #19873, scripts/PATCH_MANIFEST.md Category 3) is the fork's second
+# application-code delta, and unlike the wizard its code does NOT live at a normal package
+# path: it is added by `esc/new/` and one upstream file is overlaid. That is deliberate —
+# `esc/**` is what the fork-scope check below allows — but it means the suite cannot simply
+# be run where the files sit in a clean checkout. The overlay has to be applied first, which
+# WRITES INTO packages/. So this gate:
+#
+#   - refuses to touch a dirty tree, because restoring it afterwards would throw somebody's
+#     uncommitted work away;
+#   - applies, runs, and restores under a trap, so a failing test still puts the tree back;
+#   - fails if the tree is not clean afterwards, rather than leaving the mess for the next
+#     command to trip over.
+#
+# The suite holds the properties that make the tour survivable across an upstream sync: a
+# step whose anchor is missing is skipped and named (mutation-tested — remove the guard in
+# selectShowableEscTourSteps and the test fails), and no step may anchor on a generated
+# class name.
+#
+# SKIPS LOUDLY, BY NAME, WHEN IT CANNOT RUN — same discriminator as the gates either side.
+#
+# WITH NO node_modules IT RUNS IN THE BUILD IMAGE RATHER THAN SKIPPING. The tour suite had
+# never been executed anywhere: no checkout carries twenty-front's dependencies and the
+# shared gate runner does not install them, so this gate skipped on every host it had ever
+# run on — a gate that cannot run is not a gate. `build-front-layer.sh --front-only` already
+# produces an image that HAS those dependencies, so when one is present the suite runs
+# inside it, against the CURRENT working tree: the tour sources and the one overlaid
+# upstream file are bind-mounted over the image's baked-in copies, so what is checked is
+# what you are about to push, not what was compiled into the image weeks ago.
+ESC_TOUR_DOCKER="${ESC_TOUR_DOCKER:-docker}"
+ESC_TOUR_RUNNER_IMAGE="${ESC_TOUR_RUNNER_IMAGE:-}"
+
+# Any image built by `build-front-layer.sh --front-only` will do — it is upstream's own
+# twenty-front-build stage, so it carries node_modules and the whole workspace. The tag is
+# whatever that build was told to call itself, so look for the ones we actually produce
+# rather than insisting on a single name.
+esc_tour_pick_runner_image() {
+  command -v "${ESC_TOUR_DOCKER%% *}" >/dev/null 2>&1 || return 1
+  if [ -n "${ESC_TOUR_RUNNER_IMAGE}" ]; then
+    ${ESC_TOUR_DOCKER} image inspect "${ESC_TOUR_RUNNER_IMAGE}" >/dev/null 2>&1 || return 1
+    return 0
+  fi
+  for candidate in esc-front-build:tour3 esc-front-build:tour2 esc-front-build:tour1 \
+                   esc-front-build:latest; do
+    if ${ESC_TOUR_DOCKER} image inspect "${candidate}" >/dev/null 2>&1; then
+      ESC_TOUR_RUNNER_IMAGE="${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [ ! -d node_modules ] && esc_tour_pick_runner_image; then
+  echo "esc-tour: no node_modules here — running the suite inside ${ESC_TOUR_RUNNER_IMAGE}"
+  # jest.preset.js is NOT in that image: upstream's build stage copies the workspace it needs
+  # to COMPILE, and the preset is only needed to TEST. Without this mount jest stops with
+  # "Preset ../../jest.preset.js not found relative to rootDir", which reads like a broken
+  # config rather than a missing file. Measured 2026-09-23.
+  ${ESC_TOUR_DOCKER} run --rm \
+    -v "$(pwd)/jest.preset.js:/app/jest.preset.js:ro" \
+    -v "$(pwd)/esc/new/packages/twenty-front/src/modules/esc-tour:/app/packages/twenty-front/src/modules/esc-tour:ro" \
+    -v "$(pwd)/esc/overlay/packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx:/app/packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx:ro" \
+    -w /app/packages/twenty-front \
+    "${ESC_TOUR_RUNNER_IMAGE}" \
+    npx jest esc-tour --config=jest.config.mjs
+  echo "esc-tour: the tour suite passed inside ${ESC_TOUR_RUNNER_IMAGE}."
+elif [ ! -d node_modules ]; then
+  echo "esc-tour: SKIPPED — node_modules is absent in this checkout AND no esc-front-build" >&2
+  echo "esc-tour:   image is present, so the suite cannot be run by anyone from here." >&2
+  echo "esc-tour:   THIS RUN DID NOT CHECK THE TOUR." >&2
+  echo "esc-tour:   Either run ./verify.sh on a clone with dependencies installed, or build" >&2
+  echo "esc-tour:   the runner image once on a host with room:" >&2
+  echo "esc-tour:     REACT_APP_SERVER_BASE_URL= ESC_FRONT_BUILD_IMAGE=esc-front-build:tour3 \\" >&2
+  echo "esc-tour:       ./esc/deploy/build-front-layer.sh --front-only" >&2
+elif [ -n "$(git status --porcelain -- packages/ 2>/dev/null)" ]; then
+  echo "esc-tour: SKIPPED — packages/ has uncommitted changes, and this gate has to" >&2
+  echo "esc-tour:   apply the overlay into packages/ and then restore it. Restoring over" >&2
+  echo "esc-tour:   your work would delete it. THIS RUN DID NOT CHECK THE TOUR." >&2
+  echo "esc-tour:   Commit or stash packages/ and run ./verify.sh again." >&2
+else
+  esc_tour_restore() {
+    git checkout -- packages/ 2>/dev/null || true
+    git clean -fdq packages/twenty-front/src/modules/esc-tour 2>/dev/null || true
+    rm -rf .esc-originals
+  }
+  trap esc_tour_restore EXIT
+
+  ./esc/esc-apply.sh --no-verify >/dev/null
+  (cd packages/twenty-front && npx jest esc-tour --config=jest.config.mjs)
+
+  esc_tour_restore
+  trap - EXIT
+
+  if [ -n "$(git status --porcelain -- packages/ 2>/dev/null)" ]; then
+    echo "esc-tour: the tree was NOT restored after applying the overlay:" >&2
+    git status --porcelain -- packages/ | sed 's/^/    /' >&2
+    echo "  Restore it by hand before pushing — the overlay belongs in esc/, not packages/." >&2
+    exit 1
+  fi
+
+  echo "esc-tour: the tour suite passed and the tree was restored."
+fi
+
 echo "gate: org-specific application changes must have targeted checks"
 
 # ---------------------------------------------------------------------------
