@@ -5,8 +5,18 @@ import { type EscTourStep } from '@/esc-tour/types/EscTourStep';
 
 const STEPS: EscTourStep[] = [
   { id: 'welcome', title: 'Welcome', body: 'W' },
-  { id: 'people', title: 'People', body: 'P', anchor: 'a[href="/objects/people"]' },
-  { id: 'gone', title: 'Gone', body: 'G', anchor: 'a[href="/objects/unicorns"]' },
+  {
+    id: 'people',
+    title: 'People',
+    body: 'P',
+    anchor: 'a[href="/objects/people"]',
+  },
+  {
+    id: 'gone',
+    title: 'Gone',
+    body: 'G',
+    anchor: 'a[href="/objects/unicorns"]',
+  },
   { id: 'done', title: 'Done', body: 'D' },
 ];
 
@@ -19,7 +29,9 @@ const putPeopleLinkOnThePage = () => {
 
 const pressKey = (key: string) => {
   act(() => {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true }),
+    );
   });
 };
 
@@ -183,7 +195,13 @@ describe('useEscTour', () => {
         ({ top: 100, left: 20, width: 200, height: 32 }) as DOMRect;
 
       const { result } = renderTour([
-        { id: 'people', title: 'P', body: 'P', anchor: 'a[href="/objects/people"]', padding: 6 },
+        {
+          id: 'people',
+          title: 'P',
+          body: 'P',
+          anchor: 'a[href="/objects/people"]',
+          padding: 6,
+        },
       ]);
 
       act(() => result.current.open());

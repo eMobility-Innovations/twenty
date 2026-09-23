@@ -36,7 +36,10 @@ describe('resolveEscTourAnchor', () => {
       anchor: 'a[href="/objects/people"]',
     };
 
-    const resolved = resolveEscTourAnchor(step, buildDocument('<a href="/objects/companies">c</a>'));
+    const resolved = resolveEscTourAnchor(
+      step,
+      buildDocument('<a href="/objects/companies">c</a>'),
+    );
 
     expect(resolved.isAnchored).toBe(true);
     expect(resolved.isMissing).toBe(true);
@@ -87,8 +90,18 @@ describe('selectShowableEscTourSteps', () => {
     const container = buildDocument('<a href="/objects/people">p</a>');
     const steps: EscTourStep[] = [
       { id: 'welcome', title: 'T', body: 'B' },
-      { id: 'people', title: 'T', body: 'B', anchor: 'a[href="/objects/people"]' },
-      { id: 'gone', title: 'T', body: 'B', anchor: 'a[href="/objects/unicorns"]' },
+      {
+        id: 'people',
+        title: 'T',
+        body: 'B',
+        anchor: 'a[href="/objects/people"]',
+      },
+      {
+        id: 'gone',
+        title: 'T',
+        body: 'B',
+        anchor: 'a[href="/objects/unicorns"]',
+      },
     ];
 
     const { showableSteps, missingStepIds } = selectShowableEscTourSteps(
@@ -144,7 +157,12 @@ describe('selectShowableEscTourSteps', () => {
     );
 
     const resolved = resolveEscTourAnchor(
-      { id: 'people', title: 'T', body: 'B', anchor: 'a[href="/objects/people"]' },
+      {
+        id: 'people',
+        title: 'T',
+        body: 'B',
+        anchor: 'a[href="/objects/people"]',
+      },
       container,
     );
 
@@ -152,7 +170,9 @@ describe('selectShowableEscTourSteps', () => {
   });
 
   it('resolves to the anchor itself when it is its own nearest matching ancestor', () => {
-    const container = buildDocument('<nav><a href="/objects/people">p</a></nav>');
+    const container = buildDocument(
+      '<nav><a href="/objects/people">p</a></nav>',
+    );
 
     const resolved = resolveEscTourAnchor(
       {

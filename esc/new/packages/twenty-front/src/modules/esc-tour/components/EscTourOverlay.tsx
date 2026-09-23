@@ -111,7 +111,9 @@ export const EscTourOverlay = ({ tour }: { tour: EscTourController }) => {
       <div className="esc-tour-lock" data-esc-tour="interaction-lock" />
       <div
         className="esc-tour-spotlight"
-        data-esc-tour={tour.anchorRect === null ? 'spotlight-none' : 'spotlight'}
+        data-esc-tour={
+          tour.anchorRect === null ? 'spotlight-none' : 'spotlight'
+        }
         style={spotlightStyle}
       />
       <div

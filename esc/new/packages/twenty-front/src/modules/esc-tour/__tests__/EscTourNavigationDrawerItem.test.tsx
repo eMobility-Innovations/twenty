@@ -90,7 +90,9 @@ describe('EscTourNavigationDrawerItem', () => {
   // none of the object routes present, every anchored step is skipped — and the person
   // looking at a support ticket needs to be able to see that happened.
   it('names the steps it skipped, where a support person can read it', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
 
     render(<EscTourNavigationDrawerItem />);
     fireEvent.click(screen.getByText('Tour'));
@@ -105,7 +107,9 @@ describe('EscTourNavigationDrawerItem', () => {
   });
 
   it('says nothing when every anchor resolves', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
 
     putRouteLinksOnThePage([
       'people',

@@ -69,7 +69,9 @@ describe('EscTourOverlay', () => {
     const { container } = render(<EscTourOverlay tour={buildController()} />);
 
     expect(container).toBeEmptyDOMElement();
-    expect(document.body.querySelector('[data-esc-tour="popover"]')).not.toBeNull();
+    expect(
+      document.body.querySelector('[data-esc-tour="popover"]'),
+    ).not.toBeNull();
   });
 
   it('is announced as a modal dialog labelled with the step title', () => {
@@ -153,9 +155,7 @@ describe('EscTourOverlay', () => {
       first.unmount();
       render(<EscTourOverlay tour={buildController()} />);
 
-      expect(
-        document.querySelectorAll('#esc-tour-stylesheet'),
-      ).toHaveLength(1);
+      expect(document.querySelectorAll('#esc-tour-stylesheet')).toHaveLength(1);
     });
 
     // It is added on mount, not on open, so the first frame of the first tour is already
@@ -203,7 +203,9 @@ describe('EscTourOverlay', () => {
 
     it('says Finish rather than Next on the last step', () => {
       render(
-        <EscTourOverlay tour={buildController({ stepIndex: 2, stepCount: 3 })} />,
+        <EscTourOverlay
+          tour={buildController({ stepIndex: 2, stepCount: 3 })}
+        />,
       );
 
       expect(screen.getByText('Finish')).toBeInTheDocument();
