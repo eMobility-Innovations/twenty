@@ -32,6 +32,20 @@ const ESC_TOUR_TITLE_ID = 'esc-tour-title';
 const ESC_TOUR_BODY_ID = 'esc-tour-body';
 
 /**
+ * What the popover says while it is waiting for a step's anchor to appear.
+ *
+ * Short, and about the PAGE rather than about the tour: the reader has just watched the
+ * screen change, and the one thing they need told is that it is meant to be happening.
+ * Saying nothing was the alternative and it is the worse one — the spotlight is gone, the
+ * step's own copy describes something not on screen yet, and a popover that keeps
+ * describing an invisible thing reads as broken.
+ *
+ * It replaces the body rather than sitting under it, so nothing is on screen describing
+ * something the reader cannot see.
+ */
+export const ESC_TOUR_WAITING_BODY = 'Opening this page…';
+
+/**
  * What Tab can land on inside the popover. Deliberately narrow: the popover only ever
  * holds buttons, and a selector that guesses widely is a selector that traps focus on a
  * node the browser would have skipped.
@@ -225,7 +239,16 @@ export const EscTourOverlay = ({ tour }: { tour: EscTourController }) => {
   });
 
   const isLastStep = tour.stepIndex === tour.stepCount - 1;
-  const stepCounterLabel = `Step ${tour.stepIndex + 1} of ${tour.stepCount}`;
+
+  // The chapter goes INTO the counter's spoken label rather than beside it, so a screen
+  // reader gets one sentence that places the reader — "The left panel, step 3 of 12" —
+  // instead of an orphan phrase followed by a number. The visible chapter is therefore
+  // aria-hidden: it is already being said.
+  const stepPositionLabel = `step ${tour.stepIndex + 1} of ${tour.stepCount}`;
+  const stepCounterLabel =
+    tour.step.chapter === undefined
+      ? `Step ${tour.stepIndex + 1} of ${tour.stepCount}`
+      : `${tour.step.chapter}, ${stepPositionLabel}`;
 
   const isSideways = placement.side === 'left' || placement.side === 'right';
   // Clamped against the box as it will actually be RENDERED — the placement's own width,
@@ -305,21 +328,52 @@ export const EscTourOverlay = ({ tour }: { tour: EscTourController }) => {
         }
       >
         <div className="esc-tour-popover-scroll">
-          {/* "1 / 9" is read out as "one slash nine". The visible form stays, hidden from
-              the accessibility tree, and the spoken form is given twice over: as the
-              element's label, and as text for anything that does not honour a label on an
-              element with no role. Only one of the two is ever announced. */}
-          <div className="esc-tour-counter" aria-label={stepCounterLabel}>
-            <span aria-hidden="true">
-              {tour.stepIndex + 1} / {tour.stepCount}
-            </span>
-            <span className="esc-tour-visually-hidden">{stepCounterLabel}</span>
+          {/* The chapter and the counter share a row: the name of the part of the product
+              being shown on the left, where the reader is in it on the right. A thirty-step
+              run that only ever says "17 / 30" tells somebody how much is left and nothing
+              about what they are looking at. */}
+          <div className="esc-tour-header">
+            {tour.step.chapter !== undefined && (
+              <span
+                className="esc-tour-chapter"
+                data-esc-tour="chapter"
+                aria-hidden="true"
+              >
+                {tour.step.chapter}
+              </span>
+            )}
+            {/* "1 / 9" is read out as "one slash nine". The visible form stays, hidden from
+                the accessibility tree, and the spoken form is given twice over: as the
+                element's label, and as text for anything that does not honour a label on an
+                element with no role. Only one of the two is ever announced. */}
+            <div className="esc-tour-counter" aria-label={stepCounterLabel}>
+              <span aria-hidden="true">
+                {tour.stepIndex + 1} / {tour.stepCount}
+              </span>
+              <span className="esc-tour-visually-hidden">
+                {stepCounterLabel}
+              </span>
+            </div>
           </div>
           <h2 className="esc-tour-title" id={ESC_TOUR_TITLE_ID}>
             {tour.step.title}
           </h2>
-          <p className="esc-tour-body" id={ESC_TOUR_BODY_ID}>
-            {tour.step.body}
+          {/* One element, two contents, because it is the dialog's description either way —
+              swapping between two elements would leave aria-describedby pointing at
+              whichever one happened to exist. `aria-live` is what makes the arrival of the
+              real copy audible: the popover is focused once per step, and the wait ends
+              without any focus change to announce it. */}
+          <p
+            className={
+              tour.isWaitingForAnchor
+                ? 'esc-tour-body esc-tour-body--waiting'
+                : 'esc-tour-body'
+            }
+            id={ESC_TOUR_BODY_ID}
+            data-esc-tour={tour.isWaitingForAnchor ? 'waiting' : 'body'}
+            aria-live="polite"
+          >
+            {tour.isWaitingForAnchor ? ESC_TOUR_WAITING_BODY : tour.step.body}
           </p>
           <div className="esc-tour-actions">
             {/* "Close" is only honest on the last step. Everywhere else this control ends a

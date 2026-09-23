@@ -190,7 +190,37 @@ export const ESC_TOUR_STYLESHEET = `
   white-space: nowrap;
 }
 
+/* Chapter on the left, counter on the right, on one line. */
+.esc-tour-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* At FULL inherited colour, unlike the counter beside it, and neither reason is taste. The
+   chapter is the half worth reading. And a coloured chapter would need a blue clearing
+   4.5:1 at 11px on both #ffffff and #1d1d1d — the popover's own accent, #3b7ff5, measures
+   about 3.6:1 on white and would not; inheriting keeps it at the body colour, 16:1 in both
+   schemes, and the weight does the separating instead.
+
+   \`min-width: 0\` is what lets the ellipsis happen at all: a flex item will not shrink
+   below its content width without it, and a long chapter name would shove the counter off
+   the edge of the popover. */
+.esc-tour-chapter {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .esc-tour-counter {
+  flex: 0 0 auto;
+  margin-left: auto;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.06em;
@@ -214,6 +244,16 @@ export const ESC_TOUR_STYLESHEET = `
   font-size: 14px;
   line-height: 1.5;
   opacity: 0.85;
+}
+
+/* The line shown while a step's page is still loading. Italic and nothing else — NO
+   animation, deliberately. A spinner or a pulsing dot here would be motion that the
+   reduced-motion block would then have to switch off, and the whole point of this state is
+   that it lasts a few hundred milliseconds; something that draws the eye for that long is
+   a flicker, not feedback. */
+.esc-tour-body--waiting {
+  font-style: italic;
+  opacity: 0.7;
 }
 
 .esc-tour-actions {

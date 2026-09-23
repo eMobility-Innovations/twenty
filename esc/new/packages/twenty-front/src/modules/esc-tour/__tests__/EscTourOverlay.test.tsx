@@ -1,6 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { EscTourOverlay } from '@/esc-tour/components/EscTourOverlay';
+import {
+  ESC_TOUR_WAITING_BODY,
+  EscTourOverlay,
+} from '@/esc-tour/components/EscTourOverlay';
 import { ESC_TOUR_STYLESHEET } from '@/esc-tour/constants/escTourStylesheet';
 import { type EscTourController } from '@/esc-tour/hooks/useEscTour';
 
@@ -14,6 +17,7 @@ const buildController = (
   anchorRect: { top: 100, left: 20, width: 200, height: 32 },
   missingStepIds: [],
   isResumed: false,
+  isWaitingForAnchor: false,
   open: jest.fn(),
   close: jest.fn(),
   next: jest.fn(),
@@ -499,6 +503,154 @@ describe('EscTourOverlay', () => {
           expect(reducedMotionBlock).toContain(`${selector} {`);
         }
       }
+    });
+  });
+
+  // A deep tour is thirty-odd steps. "17 / 30" tells the reader how much is left and
+  // nothing whatever about what they are being shown.
+  describe('chapters', () => {
+    it('shows the chapter beside the counter', () => {
+      render(
+        <EscTourOverlay
+          tour={buildController({
+            step: {
+              id: 'people-list',
+              title: 'The People list',
+              body: 'Everyone we have dealt with.',
+              chapter: 'The left panel',
+            },
+            stepIndex: 2,
+            stepCount: 12,
+          })}
+        />,
+      );
+
+      expect(
+        document.querySelector('[data-esc-tour="chapter"]'),
+      ).toHaveTextContent('The left panel');
+      expect(screen.getByText('3 / 12')).toBeInTheDocument();
+    });
+
+    // One sentence that places the reader, not an orphan phrase followed by a number.
+    it('puts the chapter into the counter’s spoken label, once', () => {
+      render(
+        <EscTourOverlay
+          tour={buildController({
+            step: {
+              id: 'people-list',
+              title: 'The People list',
+              body: 'Everyone we have dealt with.',
+              chapter: 'The left panel',
+            },
+            stepIndex: 2,
+            stepCount: 12,
+          })}
+        />,
+      );
+
+      expect(document.querySelector('.esc-tour-counter')).toHaveAttribute(
+        'aria-label',
+        'The left panel, step 3 of 12',
+      );
+
+      // Said in the label, so the visible copy of it must not be said again.
+      expect(
+        document.querySelector('[data-esc-tour="chapter"]'),
+      ).toHaveAttribute('aria-hidden', 'true');
+    });
+
+    it('says nothing about chapters for a step that has none', () => {
+      render(<EscTourOverlay tour={buildController()} />);
+
+      expect(document.querySelector('[data-esc-tour="chapter"]')).toBeNull();
+      expect(document.querySelector('.esc-tour-counter')).toHaveAttribute(
+        'aria-label',
+        'Step 1 of 3',
+      );
+    });
+  });
+
+  // While the tour is navigating, the spotlight is gone and the step's own copy describes
+  // something that is not on screen yet. Showing it anyway is what makes a tour read as
+  // broken rather than as busy.
+  describe('while it is waiting for a page', () => {
+    const waitingController = () =>
+      buildController({
+        isWaitingForAnchor: true,
+        anchorRect: null,
+        step: {
+          id: 'people-list',
+          title: 'The People list',
+          body: 'Everyone we have dealt with.',
+          route: '/objects/people',
+          anchor: '[data-testid="record-table"]',
+        },
+      });
+
+    it('says the page is opening instead of describing what is not there', () => {
+      render(<EscTourOverlay tour={waitingController()} />);
+
+      expect(screen.getByText(ESC_TOUR_WAITING_BODY)).toBeInTheDocument();
+      expect(
+        screen.queryByText('Everyone we have dealt with.'),
+      ).not.toBeInTheDocument();
+    });
+
+    // The wait ends without any focus change, so a live region is the only thing that
+    // makes the real copy arriving audible.
+    it('keeps the dialog’s description on one live element either way', () => {
+      const { rerender } = render(
+        <EscTourOverlay tour={waitingController()} />,
+      );
+
+      const describedBy = screen
+        .getByRole('dialog')
+        .getAttribute('aria-describedby') as string;
+
+      expect(document.getElementById(describedBy)).toHaveAttribute(
+        'aria-live',
+        'polite',
+      );
+      expect(document.getElementById(describedBy)).toHaveTextContent(
+        ESC_TOUR_WAITING_BODY,
+      );
+
+      rerender(
+        <EscTourOverlay
+          tour={{ ...waitingController(), isWaitingForAnchor: false }}
+        />,
+      );
+
+      expect(document.getElementById(describedBy)).toHaveTextContent(
+        'Everyone we have dealt with.',
+      );
+    });
+
+    // The way out of a wait that is going nowhere. Without these the reader is held by an
+    // interaction lock with nothing to press.
+    it('still offers every control, so nobody is trapped in a wait', () => {
+      const tour = waitingController();
+
+      render(<EscTourOverlay tour={{ ...tour, stepIndex: 1 }} />);
+      fireEvent.click(screen.getByText('Skip tour'));
+      fireEvent.click(screen.getByText('Next'));
+      fireEvent.click(screen.getByText('Back'));
+
+      expect(tour.close).toHaveBeenCalledTimes(1);
+      expect(tour.next).toHaveBeenCalledTimes(1);
+      expect(tour.previous).toHaveBeenCalledTimes(1);
+    });
+
+    // The whole point of the state: no cut-out is left sitting over the old page.
+    it('draws no spotlight while it waits', () => {
+      render(<EscTourOverlay tour={waitingController()} />);
+
+      expect(
+        document.querySelector('[data-esc-tour="spotlight-ring"]'),
+      ).toBeNull();
+      expect(
+        document.querySelector('[data-esc-tour="spotlight-none"]'),
+      ).not.toBeNull();
     });
   });
 

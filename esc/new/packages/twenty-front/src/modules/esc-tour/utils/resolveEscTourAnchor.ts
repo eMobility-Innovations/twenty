@@ -73,11 +73,33 @@ export const resolveEscTourAnchor = (
 };
 
 /**
- * The steps a tour can actually show right now, plus the ids of the ones it cannot.
+ * The steps a tour can actually show, plus the ids of the ones it cannot.
  *
  * The second half is the point. A tour that quietly drops a step when upstream moves a
  * route looks like it is working; this makes the gap a value a caller can read, log, or
  * assert on in a test.
+ *
+ * ONLY ROUTE-LESS STEPS ARE JUDGED HERE, AND THAT IS THE WHOLE CHANGE OF 2026-09-23
+ *
+ * This used to resolve EVERY step once, against the page the person was standing on when
+ * they pressed Tour, and drop every one that did not match. For the sidebar-only tour that
+ * was right: every anchor was inside the navigation drawer, which is on screen on every
+ * page, so "not here now" genuinely meant "gone".
+ *
+ * It is fatal for a tour that navigates. A step anchored on a row of the People list is, at
+ * open() time, on a page nobody has visited — it matches nothing, it would be dropped, and
+ * the deep tour would collapse back to the sidebar-only tour leaving no more trace than the
+ * `console.warn` that let six of nine steps vanish in production on 2026-09-22.
+ *
+ * So: a step that names a `route` is ALWAYS kept in the run. Its anchor is a claim about a
+ * page that has not loaded, and this function has no evidence to rule on it with. The
+ * ruling happens where the evidence is — once the tour has navigated there and given the
+ * anchor until `ESC_TOUR_ANCHOR_DEADLINE_MS` to appear (`useEscTour`), which then drops it
+ * through `skipUnreachableEscTourStep` and names it in this same `missingStepIds` list.
+ * Nothing ends up quieter than before; it is decided later, against the right page.
+ *
+ * An `optional` step is the one thing dropped without being named — see
+ * `EscTourStep.optional` for why an empty list is not drift.
  */
 export const selectShowableEscTourSteps = (
   steps: EscTourStep[],
@@ -87,10 +109,18 @@ export const selectShowableEscTourSteps = (
   const missingStepIds: string[] = [];
 
   for (const step of steps) {
+    if (step.route !== undefined) {
+      showableSteps.push(step);
+      continue;
+    }
+
     const { isMissing } = resolveEscTourAnchor(step, root);
 
     if (isMissing) {
-      missingStepIds.push(step.id);
+      if (step.optional !== true) {
+        missingStepIds.push(step.id);
+      }
+
       continue;
     }
 

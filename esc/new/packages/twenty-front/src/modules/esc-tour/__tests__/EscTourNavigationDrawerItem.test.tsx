@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 import { EscTourMount } from '@/esc-tour/components/EscTourMount';
 import { EscTourNavigationDrawerItem } from '@/esc-tour/components/EscTourNavigationDrawerItem';
@@ -66,15 +67,20 @@ jest.mock('twenty-ui/display', () => ({ IconMap: () => null }));
  * `isButtonMounted` stands in for collapsing "Other", which unmounts everything inside
  * that container.
  */
+// EscTourMount calls useNavigate(), which throws outside a Router — the tour navigates
+// between pages now, and in the real app the mount sits inside the app's RouterProvider.
+// A MemoryRouter is the smallest thing that makes this harness the same shape as
+// production; without it every test here fails on the same invariant and none of them
+// is about routing.
 const TourHarness = ({
   isButtonMounted = true,
 }: {
   isButtonMounted?: boolean;
 }) => (
-  <>
+  <MemoryRouter>
     {isButtonMounted && <EscTourNavigationDrawerItem />}
     <EscTourMount />
-  </>
+  </MemoryRouter>
 );
 
 describe('EscTourNavigationDrawerItem', () => {
