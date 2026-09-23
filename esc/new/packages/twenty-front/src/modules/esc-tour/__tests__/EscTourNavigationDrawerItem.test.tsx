@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 import { EscTourMount } from '@/esc-tour/components/EscTourMount';
 import { EscTourNavigationDrawerItem } from '@/esc-tour/components/EscTourNavigationDrawerItem';
@@ -66,15 +67,20 @@ jest.mock('twenty-ui/display', () => ({ IconMap: () => null }));
  * `isButtonMounted` stands in for collapsing "Other", which unmounts everything inside
  * that container.
  */
+// EscTourMount calls useNavigate(), which throws outside a Router — the tour navigates
+// between pages now, and in the real app the mount sits inside the app's RouterProvider.
+// A MemoryRouter is the smallest thing that makes this harness the same shape as
+// production; without it every test here fails on the same invariant and none of them
+// is about routing.
 const TourHarness = ({
   isButtonMounted = true,
 }: {
   isButtonMounted?: boolean;
 }) => (
-  <>
+  <MemoryRouter>
     {isButtonMounted && <EscTourNavigationDrawerItem />}
     <EscTourMount />
-  </>
+  </MemoryRouter>
 );
 
 describe('EscTourNavigationDrawerItem', () => {
@@ -91,6 +97,18 @@ describe('EscTourNavigationDrawerItem', () => {
     drawer.setAttribute('data-click-outside-id', 'navigation-drawer');
     document.body.appendChild(drawer);
     addedNodes.push(drawer);
+  };
+
+  // The workspace-name step anchors on the workspace switcher's own test id
+  // (MultiWorkspaceDropdownClickableComponent.tsx:31). It is route-less, so it is judged at
+  // open() like the sidebar step beside it — a fixture that leaves it out makes the
+  // every-anchor-resolves test fail for a reason that has nothing to do with the tour.
+  const putWorkspaceSwitcherOnThePage = () => {
+    const switcher = document.createElement('div');
+
+    switcher.setAttribute('data-testid', 'workspace-dropdown');
+    document.body.appendChild(switcher);
+    addedNodes.push(switcher);
   };
 
   const putRouteLinksOnThePage = (routes: string[]) => {
@@ -232,6 +250,7 @@ describe('EscTourNavigationDrawerItem', () => {
       .mockImplementation(() => undefined);
 
     putNavigationDrawerOnThePage();
+    putWorkspaceSwitcherOnThePage();
     putRouteLinksOnThePage([
       'people',
       'companies',

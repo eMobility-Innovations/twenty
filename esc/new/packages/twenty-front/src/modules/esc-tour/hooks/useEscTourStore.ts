@@ -23,15 +23,36 @@ import { selectShowableEscTourSteps } from '@/esc-tour/utils/resolveEscTourAncho
  * `useSyncExternalStore` is in React itself and is the sanctioned way to read an
  * external store without tearing.
  */
+/**
+ * Which way the reader is travelling.
+ *
+ * It exists for ONE decision, and it is not cosmetic: when a step turns out to be
+ * unreachable and is dropped mid-run, the tour has to land on the step the reader was
+ * heading TOWARDS. Always landing on the following one bounces somebody who pressed Back
+ * straight forward again, every time, with no way past it — a wedged tour, which is the
+ * thing this change is most careful not to ship.
+ */
+export type EscTourDirection = 'forward' | 'backward';
+
 export type EscTourState = {
   isOpen: boolean;
   stepIndex: number;
-  /** The steps this run can actually show, resolved once when the tour was opened. */
+  /**
+   * The steps this run can show. Route-less steps were resolved when the tour opened;
+   * routed steps are carried unresolved and judged when the tour reaches their page — see
+   * `selectShowableEscTourSteps`. A routed step whose anchor never appears is taken OUT of
+   * this list by `skipUnreachableEscTourStep`, so a run can shorten as it is walked.
+   */
   showableSteps: EscTourStep[];
-  /** Step ids whose anchor did not resolve when the tour was opened. */
+  /**
+   * Step ids named as unreachable: route-less ones missing at open, and routed ones whose
+   * anchor never appeared on its own page. An `optional` step is never in here.
+   */
   missingStepIds: string[];
   /** True when this run picked up where an interrupted one left off. */
   isResumed: boolean;
+  /** Which way the last move went. See `EscTourDirection`. */
+  direction: EscTourDirection;
 };
 
 /**
@@ -54,6 +75,7 @@ const CLOSED_ESC_TOUR_STATE: EscTourState = Object.freeze({
   showableSteps: [],
   missingStepIds: [],
   isResumed: false,
+  direction: 'forward',
 });
 
 let escTourState: EscTourState = CLOSED_ESC_TOUR_STATE;
@@ -133,8 +155,14 @@ export const useEscTourState = (): EscTourState =>
   );
 
 export const openEscTour = (steps: EscTourStep[]) => {
-  // Resolved once, at open: the set of steps must not change under the user's feet
-  // halfway through, which is what recomputing on every render would do.
+  // Resolved once, at open, and never recomputed on a render: the set of steps must not
+  // change under the reader's feet because something on the page moved.
+  //
+  // It is no longer resolved COMPLETELY at open, and that is deliberate — a step naming a
+  // route is about a page nobody has visited, so there is nothing here to judge it by.
+  // `selectShowableEscTourSteps` carries those through, and the only thing that may take
+  // one out afterwards is `skipUnreachableEscTourStep`, on evidence gathered on that
+  // step's own page.
   const { showableSteps, missingStepIds } = selectShowableEscTourSteps(steps);
 
   // The STEP ID is persisted, not the index. The showable set is resolved fresh on
@@ -163,6 +191,7 @@ export const openEscTour = (steps: EscTourStep[]) => {
     showableSteps,
     missingStepIds,
     isResumed,
+    direction: 'forward',
   });
 
   writeEscTourResumeStepId(showableSteps[stepIndex]?.id);
@@ -193,7 +222,7 @@ export const goToNextEscTourStep = () => {
 
   const stepIndex = escTourState.stepIndex + 1;
 
-  setEscTourState({ ...escTourState, stepIndex });
+  setEscTourState({ ...escTourState, stepIndex, direction: 'forward' });
   writeEscTourResumeStepId(escTourState.showableSteps[stepIndex]?.id);
 };
 
@@ -204,7 +233,7 @@ export const goToPreviousEscTourStep = () => {
 
   const stepIndex = Math.max(0, escTourState.stepIndex - 1);
 
-  setEscTourState({ ...escTourState, stepIndex });
+  setEscTourState({ ...escTourState, stepIndex, direction: 'backward' });
   writeEscTourResumeStepId(escTourState.showableSteps[stepIndex]?.id);
 };
 
@@ -213,8 +242,91 @@ export const restartEscTour = () => {
     return;
   }
 
-  setEscTourState({ ...escTourState, stepIndex: 0, isResumed: false });
+  setEscTourState({
+    ...escTourState,
+    stepIndex: 0,
+    isResumed: false,
+    direction: 'forward',
+  });
   writeEscTourResumeStepId(escTourState.showableSteps[0]?.id);
+};
+
+/**
+ * Take a step out of the run because its anchor never turned up on its own page.
+ *
+ * WHY IT IS REMOVED RATHER THAN STEPPED OVER
+ *
+ * The alternative — leave it in and jump past it — puts a step in the run that cannot be
+ * shown, and Back walks the reader straight back into it. It waits out the deadline again,
+ * jumps forward again, and the tour has a wall in it: the reader can never get behind that
+ * step. Taking it out means it is gone from BOTH directions, once, which is also exactly
+ * what happens to a route-less step that is missing at open. The visible counter shortens
+ * by one; that is honest, and it is a truer number than a total that counts a step nobody
+ * will ever be shown.
+ *
+ * `direction` decides where the reader lands: the way they were already travelling. See
+ * `EscTourDirection`.
+ *
+ * Nothing else may call this. It names a step id rather than taking an index because the
+ * caller is a DEADLINE that was armed one step ago — by the time it fires the run may have
+ * moved on, and an index would then drop an innocent step. An id that is no longer in the
+ * run is a no-op, which is the right answer to a deadline that lost its race.
+ */
+export const skipUnreachableEscTourStep = (stepId: string) => {
+  if (!escTourState.isOpen) {
+    return;
+  }
+
+  const skippedIndex = escTourState.showableSteps.findIndex(
+    (step) => step.id === stepId,
+  );
+
+  if (skippedIndex === -1) {
+    return;
+  }
+
+  const skippedStep = escTourState.showableSteps[skippedIndex];
+  const showableSteps = escTourState.showableSteps.filter(
+    (step) => step.id !== stepId,
+  );
+
+  // `optional` is the difference between "this workspace has no saved views" and "upstream
+  // moved a route". Only the second one is news. See `EscTourStep.optional`.
+  const missingStepIds =
+    skippedStep.optional === true
+      ? escTourState.missingStepIds
+      : [...escTourState.missingStepIds, stepId];
+
+  const stepIndex =
+    escTourState.direction === 'backward'
+      ? Math.max(0, skippedIndex - 1)
+      : skippedIndex;
+
+  // Nothing left to show, or the dropped step was the last one and the reader was going
+  // forwards: the run is over. Closing here is also what stops a tour whose every step
+  // turned out to be unreachable from sitting there with its interaction lock over the
+  // whole CRM.
+  //
+  // It closes to a state that CARRIES the report rather than to the shared closed one.
+  // Closing to `CLOSED_ESC_TOUR_STATE` would erase `missingStepIds` in the same tick it
+  // was added to, so the one case that most deserves reporting — a run that collapsed
+  // because its steps could not be found — would be the one case that reported nothing.
+  // That is the 2026-09-22 failure with a different mechanism, and this is the line that
+  // stops it. `EscTourMount` therefore reports whether or not the tour is still open.
+  if (showableSteps.length === 0 || stepIndex > showableSteps.length - 1) {
+    clearEscTourResumeStepId();
+    setEscTourState({ ...CLOSED_ESC_TOUR_STATE, missingStepIds });
+
+    return;
+  }
+
+  setEscTourState({
+    ...escTourState,
+    showableSteps,
+    missingStepIds,
+    stepIndex,
+  });
+  writeEscTourResumeStepId(showableSteps[stepIndex]?.id);
 };
 
 /**

@@ -237,6 +237,81 @@ describe('selectShowableEscTourSteps', () => {
     expect(missingStepIds).toEqual(['gone']);
   });
 
+  // THE DEFECT THIS EXISTS FOR. Before 2026-09-23 every step was resolved once, at open(),
+  // against the page the reader was standing on. A step about the People list is, at that
+  // moment, on a page nobody has visited — so it matched nothing, it was dropped, and a
+  // navigating tour would have quietly collapsed back into the sidebar-only tour it
+  // replaced. Delete the `step.route !== undefined` branch and this test fails.
+  it('keeps a routed step whose anchor is nowhere on this page', () => {
+    const container = buildDocument('<a href="/objects/people">p</a>');
+    const steps: EscTourStep[] = [
+      { id: 'sidebar', title: 'T', body: 'B', anchor: 'a' },
+      {
+        id: 'people-list',
+        title: 'T',
+        body: 'B',
+        route: '/objects/people',
+        anchor: '[data-testid="record-table"]',
+      },
+    ];
+
+    const { showableSteps, missingStepIds } = selectShowableEscTourSteps(
+      steps,
+      container,
+    );
+
+    expect(showableSteps.map((step) => step.id)).toEqual([
+      'sidebar',
+      'people-list',
+    ]);
+    expect(missingStepIds).toEqual([]);
+  });
+
+  // A routed step is not judged here at all — not even when its anchor happens to be on
+  // this page already. The page it names is the only page that can answer for it, and
+  // ruling early would mean ruling twice, by two different rules.
+  it('does not name a routed step as missing, whatever is on the current page', () => {
+    const { showableSteps, missingStepIds } = selectShowableEscTourSteps(
+      [
+        {
+          id: 'record-page',
+          title: 'T',
+          body: 'B',
+          route: '/objects/people',
+          anchor: 'a[href="/objects/unicorns"]',
+        },
+      ],
+      buildDocument(''),
+    );
+
+    expect(showableSteps).toHaveLength(1);
+    expect(missingStepIds).toEqual([]);
+  });
+
+  // An empty list has no first row to point at. That is a fact about the workspace's data,
+  // not upstream drift, and naming it would train whoever reads the report to skim it.
+  it('drops an optional step without naming it', () => {
+    const steps: EscTourStep[] = [
+      { id: 'welcome', title: 'T', body: 'B' },
+      {
+        id: 'first-row',
+        title: 'T',
+        body: 'B',
+        anchor: '[data-testid="row"]',
+        optional: true,
+      },
+      { id: 'gone', title: 'T', body: 'B', anchor: '[data-testid="gone"]' },
+    ];
+
+    const { showableSteps, missingStepIds } = selectShowableEscTourSteps(
+      steps,
+      buildDocument(''),
+    );
+
+    expect(showableSteps.map((step) => step.id)).toEqual(['welcome']);
+    expect(missingStepIds).toEqual(['gone']);
+  });
+
   it('keeps the script order of the steps it does show', () => {
     const container = buildDocument(
       '<a href="/objects/b">b</a><a href="/objects/a">a</a>',
