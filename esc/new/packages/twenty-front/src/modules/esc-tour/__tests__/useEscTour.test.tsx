@@ -517,9 +517,7 @@ describe('useEscTour', () => {
 
       anchor.getBoundingClientRect = readRect;
 
-      jest
-        .spyOn(window, 'requestAnimationFrame')
-        .mockImplementation(() => 1);
+      jest.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
 
       const { result } = renderTour([
         {

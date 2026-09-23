@@ -13,6 +13,8 @@ SCRIPT="${REPO_DIR}/scripts/verify-esc-features.sh"
 PLAN_REL=packages/twenty-server/src/engine/core-modules/enterprise/services/enterprise-plan.service.ts
 IP_REL=packages/twenty-server/src/engine/core-modules/secure-http-client/utils/is-private-ip.util.ts
 DOCKERFILE_REL=packages/twenty-docker/twenty/Dockerfile
+NAV_REL=packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx
+TOUR_REL=packages/twenty-front/src/modules/esc-tour
 
 # A fixture APP_DIR whose files are the OVERLAY's, i.e. a correctly applied tree.
 # verify-esc-features.sh derives APP_DIR from its own location, so the script is copied
@@ -22,13 +24,23 @@ make_applied_tree() {
   mkdir -p "${root}/scripts" "${root}/esc/deploy" \
            "${root}/$(dirname "${PLAN_REL}")" \
            "${root}/$(dirname "${IP_REL}")" \
-           "${root}/$(dirname "${DOCKERFILE_REL}")"
+           "${root}/$(dirname "${DOCKERFILE_REL}")" \
+           "${root}/$(dirname "${NAV_REL}")" \
+           "${root}/$(dirname "${TOUR_REL}")"
 
   cp "${REPO_DIR}/scripts/verify-esc-features.sh" "${root}/scripts/"
   cp "${REPO_DIR}/esc/deploy/patch-enterprise.cjs" "${root}/esc/deploy/"
   cp "${REPO_DIR}/esc/overlay/${PLAN_REL}"       "${root}/${PLAN_REL}"
   cp "${REPO_DIR}/esc/overlay/${IP_REL}"         "${root}/${IP_REL}"
   cp "${REPO_DIR}/esc/overlay/${DOCKERFILE_REL}" "${root}/${DOCKERFILE_REL}"
+
+  # Category 3 — the tour. The fixture has to be a tree esc-apply.sh could have PRODUCED,
+  # so both halves of the overlay go in: the one overlaid upstream file from esc/overlay/,
+  # and the whole added module from esc/new/. Without them a "correctly applied overlay"
+  # fixture is not one, and the happy-path cases fail for a reason that has nothing to do
+  # with what they are testing — which is exactly what happened when Category 3 landed.
+  cp "${REPO_DIR}/esc/overlay/${NAV_REL}" "${root}/${NAV_REL}"
+  cp -R "${REPO_DIR}/esc/new/${TOUR_REL}" "${root}/$(dirname "${TOUR_REL}")/"
 
   printf '%s' "${root}"
 }
@@ -191,6 +203,73 @@ tree="$(make_applied_tree)"
 rm "${tree}/${DOCKERFILE_REL}"
 out="$(run_verifier "${tree}")"; rc=$?
 assert_exit 1 $rc && assert_contains "${out}" "Dockerfile not found" && pass
+teardown_scratch
+
+printf '\n== the guided tour (Category 3)\n'
+
+# THE FAILURE THIS WHOLE SECTION EXISTS FOR. PATCH_MANIFEST's documented upstream-upgrade
+# step is "copy the fresh upstream file into esc/overlay/ and re-apply the two hunks". Do
+# the first half and forget the second and the Tour button is gone, while every other
+# source-side gate stays green: the tour module still compiles and its unit tests still
+# pass, because they render the launcher directly and never look at the sidebar.
+begin "a fresh upstream sidebar section — the tour hunks lost — fails, and says there is no Tour button"
+setup_scratch
+tree="$(make_applied_tree)"
+python3 - "${tree}/${NAV_REL}" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s = '\n'.join(l for l in s.split('\n') if '@/esc-tour/' not in l)
+s = re.sub(r'\s*<EscTour[A-Za-z]*\s*/>', '', s)
+open(p, 'w').write(s)
+PY2
+out="$(run_verifier "${tree}")"; rc=$?
+assert_exit 1 $rc && assert_contains "${out}" "there is NO Tour button" && pass
+teardown_scratch
+
+# The shape a careless three-way merge takes: the import survives, the JSX does not. It
+# compiles, it lints, and it ships a sidebar with no Tour in it.
+begin "an import left behind with no JSX beside it fails"
+setup_scratch
+tree="$(make_applied_tree)"
+python3 - "${tree}/${NAV_REL}" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+open(p, 'w').write(re.sub(r'\s*<EscTourNavigationDrawerItem\s*/>', '', s))
+PY2
+out="$(run_verifier "${tree}")"; rc=$?
+assert_exit 1 $rc && assert_contains "${out}" "never rendered" && pass
+teardown_scratch
+
+# The overlay applied but esc/new/ not copied: the import points at nothing.
+begin "the tour module missing from the applied tree fails"
+setup_scratch
+tree="$(make_applied_tree)"
+rm -rf "${tree}/${TOUR_REL}"
+out="$(run_verifier "${tree}")"; rc=$?
+assert_exit 1 $rc && assert_contains "${out}" "esc/new/ was not copied" && pass
+teardown_scratch
+
+# The launcher's label is the marker scripts/verify-esc-tour.sh greps a BUILT BUNDLE for.
+# Renaming it there alone turns the deploy check into a false "the tour is missing", so it
+# is caught here instead — at apply time, with the other file named.
+begin "renaming the launcher label fails here rather than at deploy time"
+setup_scratch
+tree="$(make_applied_tree)"
+sed -i.bak 's/label="Tour"/label="Guided tour"/' \
+  "${tree}/${TOUR_REL}/components/EscTourNavigationDrawerItem.tsx"
+out="$(run_verifier "${tree}")"; rc=$?
+assert_exit 1 $rc && assert_contains "${out}" "Change both, or neither" && pass
+teardown_scratch
+
+# The live anchor-drift check derives its route list from these declarations. A step that
+# stops naming its object leaves that check with one fewer route and no way to know.
+begin "steps that declare no objectNamePlural fail — the drift check would have nothing to check"
+setup_scratch
+tree="$(make_applied_tree)"
+sed -i.bak "s/objectNamePlural: '[^']*'/objectNamePluralWasRemoved: 1/" \
+  "${tree}/${TOUR_REL}/constants/escTourSteps.ts"
+out="$(run_verifier "${tree}")"; rc=$?
+assert_exit 1 $rc && assert_contains "${out}" "would have nothing to check" && pass
 teardown_scratch
 
 summary

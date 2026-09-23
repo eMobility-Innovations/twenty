@@ -259,8 +259,12 @@ describe('EscTourOverlay', () => {
       expect(spotlight).not.toBeNull();
       expect(spotlight.style.getPropertyValue('--esc-tour-top')).toBe('100px');
       expect(spotlight.style.getPropertyValue('--esc-tour-left')).toBe('20px');
-      expect(spotlight.style.getPropertyValue('--esc-tour-width')).toBe('200px');
-      expect(spotlight.style.getPropertyValue('--esc-tour-height')).toBe('32px');
+      expect(spotlight.style.getPropertyValue('--esc-tour-width')).toBe(
+        '200px',
+      );
+      expect(spotlight.style.getPropertyValue('--esc-tour-height')).toBe(
+        '32px',
+      );
     });
 
     it('collapses for a step that addresses the whole screen', () => {
@@ -310,9 +314,9 @@ describe('EscTourOverlay', () => {
       expect(popover.getAttribute('data-esc-tour-side')).toMatch(
         /^(top|bottom|left|right|center)$/,
       );
-      expect(
-        popover.style.getPropertyValue('--esc-tour-arrow-offset'),
-      ).toMatch(/^-?\d+(\.\d+)?px$/);
+      expect(popover.style.getPropertyValue('--esc-tour-arrow-offset')).toMatch(
+        /^-?\d+(\.\d+)?px$/,
+      );
     });
 
     // The step-change fade is a CSS animation, and a CSS animation only replays when the
