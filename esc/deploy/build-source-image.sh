@@ -74,15 +74,11 @@ echo "    branch      : $(git rev-parse --abbrev-ref HEAD)"
 echo "    APP_VERSION : ${APP_VERSION}"
 
 # A dirty tree means the image cannot be reproduced from any commit, which is the whole
-# problem this script exists to end. Refuse rather than build something untraceable.
-# The overlay's own writes are expected, so this runs BEFORE esc-apply.sh.
-if [ -n "$(git status --porcelain)" ]; then
-  echo "build-source-image: the working tree is dirty. An image built from it cannot be" >&2
-  echo "build-source-image:   traced to a commit, which is the exact failure this script" >&2
-  echo "build-source-image:   exists to end. Commit or stash first." >&2
-  git status --short >&2
-  exit 1
-fi
+# problem this script exists to end — but the overlay's own writes are expected, so the
+# check is "nothing I cannot account for", not "no modified files". Extracted to
+# esc/deploy/lib/ so it can be exercised without running a 40-minute build;
+# esc/deploy/tests/ does, both ways.
+"${REPO_ROOT}/esc/deploy/lib/assert-tree-accounted-for.sh" "${REPO_ROOT}"
 
 if [ "$RUN_APPLY" = true ]; then
   echo "==> Applying the ESC overlay"

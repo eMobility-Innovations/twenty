@@ -21,6 +21,7 @@ check_warn() { echo -e "  ${YELLOW}WARN${NC} $1"; WARN=$((WARN + 1)); }
 PLAN_SVC="${APP_DIR}/packages/twenty-server/src/engine/core-modules/enterprise/services/enterprise-plan.service.ts"
 PRIVATE_IP_UTIL="${APP_DIR}/packages/twenty-server/src/engine/core-modules/secure-http-client/utils/is-private-ip.util.ts"
 PATCH_CJS="${APP_DIR}/esc/deploy/patch-enterprise.cjs"
+TWENTY_DOCKERFILE="${APP_DIR}/packages/twenty-docker/twenty/Dockerfile"
 
 echo -e "${BOLD}"
 echo "  ESC Twenty Feature Verification"
@@ -143,6 +144,30 @@ else
         check_pass "ESC patch marker comment present"
     else
         check_warn "ESC patch marker comment missing (cosmetic, not functional)"
+    fi
+fi
+
+echo ""
+echo "3. Base image pinned by digest"
+
+# ADDED 2026-09-22. Upstream uses the moving tag `node:24-alpine`. Production
+# (twenty-esc-sso:v2.0.0-ssrf1) runs Node v24.15.0; a source build of the same fork
+# three days later picked up v24.21.0 from that tag. An image that cannot be rebuilt
+# identically has no rollback worth the name, and nobody is told when the runtime
+# moves underneath them.
+if [ ! -f "${TWENTY_DOCKERFILE}" ]; then
+    check_fail "packages/twenty-docker/twenty/Dockerfile not found (upstream may have moved it — update esc/overlay/ and PATCH_MANIFEST.md)"
+else
+    FROM_TOTAL="$(grep -cE '^FROM node:' "${TWENTY_DOCKERFILE}" || true)"
+    FROM_PINNED="$(grep -cE '^FROM node:[0-9]+\.[0-9]+\.[0-9]+-alpine@sha256:[0-9a-f]{64}' "${TWENTY_DOCKERFILE}" || true)"
+
+    if [ "${FROM_TOTAL}" = "0" ]; then
+        check_fail "no 'FROM node:' line found at all — the Dockerfile is not the one this check was written for"
+    elif [ "${FROM_PINNED}" = "${FROM_TOTAL}" ]; then
+        check_pass "all ${FROM_TOTAL} node base images pinned to an exact version and digest"
+    else
+        check_fail "${FROM_PINNED} of ${FROM_TOTAL} node base images are pinned — a moving tag means the image cannot be rebuilt identically"
+        grep -nE '^FROM node:' "${TWENTY_DOCKERFILE}" | grep -vE '@sha256:[0-9a-f]{64}' | sed 's/^/       /'
     fi
 fi
 
