@@ -7,7 +7,14 @@
 #   for 16h41m on 2026-09-21 cannot be reintroduced by this image. The two compiled server
 #   patches (enterprise bypass, SSRF allowlist) live in server files and are inherited from
 #   the base, untouched — which is also why BASE_IMAGE must be an ESC image and never a bare
-#   upstream tag. scripts/verify-esc-image.sh is the check that catches that mistake.
+#   upstream tag.
+#
+#   That mistake is now refused BEFORE this file is ever reached:
+#   esc/deploy/build-front-layer.sh runs the enterprise behaviour probe and the SSRF
+#   allowlist grep against the BASE image and will not build the layer if either is
+#   missing. scripts/verify-esc-image.sh remains the after-the-fact check against the
+#   running container — it is the backstop now, not the only guard, because by the time it
+#   speaks the image is already serving users.
 #
 #   The frontend is plain static files served by NestJS ServeStaticModule from
 #   dist/front. There is no asset manifest, no integrity check and no CSP pinning script
@@ -18,6 +25,19 @@
 # assembles it.
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
+
+# Re-declared inside the stage on purpose: an ARG above the first FROM is in scope for the
+# FROM line and nowhere else, so without this the label below would record an empty string.
+ARG BASE_IMAGE
+
+# On 2026-09-22 two of this fork's images vanished from CT175's image store with nothing
+# on them saying where they came from or what they were. An image that cannot answer
+# "what is my base?" from `docker inspect` makes every later question archaeology.
+LABEL esc.layer="front-only" \
+      esc.layer.base-image="${BASE_IMAGE}" \
+      esc.layer.contents="packages/twenty-server/dist/front (twenty-front build, ESC overlay applied)" \
+      esc.layer.server="inherited from the base image, not rebuilt"
+
 USER root
 # The whole directory is the unit: index.html and its hashed assets must move together, or
 # the page asks for a bundle that is no longer there.

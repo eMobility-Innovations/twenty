@@ -3,6 +3,12 @@ import { computeEscTourPlacement } from '@/esc-tour/utils/computeEscTourPlacemen
 const VIEWPORT = { viewportWidth: 1440, viewportHeight: 900 };
 const POPOVER = { popoverWidth: 320, popoverHeight: 200 };
 
+const MARGIN = 16;
+
+// Every phone and tablet width this CRM is opened at, plus the one that used to break:
+// at 320 the requested 320px popover cannot fit between the margins at all.
+const NARROW_VIEWPORT_WIDTHS = [320, 375, 768];
+
 describe('computeEscTourPlacement', () => {
   it('centres the popover when the step has no anchor', () => {
     const placement = computeEscTourPlacement({
@@ -98,7 +104,67 @@ describe('computeEscTourPlacement', () => {
     expect(placement.top).toBe(320);
   });
 
-  it('keeps a popover wider than the viewport on screen rather than off its left edge', () => {
+  it('hands back the requested width when the viewport has room for it', () => {
+    const placement = computeEscTourPlacement({
+      anchorRect: { top: 300, left: 16, width: 200, height: 32 },
+      ...POPOVER,
+      ...VIEWPORT,
+    });
+
+    expect(placement.width).toBe(320);
+    expect(placement.maxHeight).toBe(900 - 2 * MARGIN);
+  });
+
+  // The old version of this test asserted `left >= 0` and passed while the popover hung off
+  // the RIGHT edge: it was 320px wide in a 320px viewport, placed at left 16, ending at 336.
+  // Both edges have to be in the assertion, and the width has to be the one that fits.
+  describe.each(NARROW_VIEWPORT_WIDTHS)(
+    'at a %ipx viewport',
+    (viewportWidth) => {
+      const narrow = {
+        popoverWidth: 320,
+        popoverHeight: 200,
+        viewportWidth,
+        viewportHeight: 640,
+      };
+
+      it('keeps an anchored popover inside both side margins', () => {
+        const placement = computeEscTourPlacement({
+          anchorRect: { top: 10, left: 0, width: 10, height: 10 },
+          ...narrow,
+        });
+
+        expect(placement.left).toBeGreaterThanOrEqual(MARGIN);
+        expect(placement.left + placement.width).toBeLessThanOrEqual(
+          viewportWidth - MARGIN,
+        );
+      });
+
+      it('keeps a centred popover inside both side margins', () => {
+        const placement = computeEscTourPlacement({
+          anchorRect: null,
+          ...narrow,
+        });
+
+        expect(placement.side).toBe('center');
+        expect(placement.left).toBeGreaterThanOrEqual(MARGIN);
+        expect(placement.left + placement.width).toBeLessThanOrEqual(
+          viewportWidth - MARGIN,
+        );
+      });
+
+      it('never reports a width wider than the viewport allows', () => {
+        const placement = computeEscTourPlacement({
+          anchorRect: { top: 10, left: 0, width: 10, height: 10 },
+          ...narrow,
+        });
+
+        expect(placement.width).toBe(Math.min(320, viewportWidth - 2 * MARGIN));
+      });
+    },
+  );
+
+  it('narrows the popover rather than letting it overflow a 320px viewport', () => {
     const placement = computeEscTourPlacement({
       anchorRect: { top: 10, left: 0, width: 10, height: 10 },
       popoverWidth: 320,
@@ -107,7 +173,53 @@ describe('computeEscTourPlacement', () => {
       viewportHeight: 480,
     });
 
-    expect(placement.left).toBeGreaterThanOrEqual(0);
-    expect(placement.top).toBeGreaterThanOrEqual(0);
+    // 320 - 16 - 16. The requested 320 was never renderable here.
+    expect(placement.width).toBe(288);
+    expect(placement.left).toBe(MARGIN);
+    expect(placement.left + placement.width).toBe(320 - MARGIN);
+  });
+
+  it('caps the popover height to the viewport less both margins', () => {
+    const placement = computeEscTourPlacement({
+      anchorRect: { top: 10, left: 0, width: 10, height: 10 },
+      popoverWidth: 320,
+      popoverHeight: 200,
+      viewportWidth: 320,
+      viewportHeight: 480,
+    });
+
+    expect(placement.maxHeight).toBe(480 - 2 * MARGIN);
+  });
+
+  // A landscape phone: the popover is taller than the screen. It must be placed as if it
+  // were maxHeight tall, because that is the height the caller will render it at.
+  it('keeps a popover taller than the viewport between the top and bottom margins', () => {
+    const placement = computeEscTourPlacement({
+      anchorRect: { top: 10, left: 0, width: 10, height: 10 },
+      popoverWidth: 320,
+      popoverHeight: 600,
+      viewportWidth: 320,
+      viewportHeight: 480,
+    });
+
+    expect(placement.maxHeight).toBe(448);
+    expect(placement.top).toBeGreaterThanOrEqual(MARGIN);
+    expect(placement.top + placement.maxHeight).toBeLessThanOrEqual(
+      480 - MARGIN,
+    );
+  });
+
+  it('keeps a centred popover taller than the viewport on screen too', () => {
+    const placement = computeEscTourPlacement({
+      anchorRect: null,
+      popoverWidth: 320,
+      popoverHeight: 600,
+      viewportWidth: 320,
+      viewportHeight: 480,
+    });
+
+    expect(placement.side).toBe('center');
+    expect(placement.top).toBe(MARGIN);
+    expect(placement.top + placement.maxHeight).toBe(480 - MARGIN);
   });
 });

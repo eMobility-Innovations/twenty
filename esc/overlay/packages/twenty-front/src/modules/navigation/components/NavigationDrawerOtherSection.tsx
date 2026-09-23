@@ -7,6 +7,7 @@ import { currentWorkspaceMemberState } from '@/auth/states/currentWorkspaceMembe
 import { getDocumentationUrl } from '@/support/utils/getDocumentationUrl';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
 
+import { EscTourMount } from '@/esc-tour/components/EscTourMount';
 import { EscTourNavigationDrawerItem } from '@/esc-tour/components/EscTourNavigationDrawerItem';
 import { NavigationDrawerAnimatedCollapseWrapper } from '@/ui/navigation/navigation-drawer/components/NavigationDrawerAnimatedCollapseWrapper';
 import { NavigationDrawerItem } from '@/ui/navigation/navigation-drawer/components/NavigationDrawerItem';
@@ -65,6 +66,13 @@ export const NavigationDrawerOtherSection = () => {
           Icon={IconHelpCircle}
         />
       </AnimatedExpandableContainer>
+      {/* ESC: the tour's overlay, mounted OUTSIDE AnimatedExpandableContainer on purpose.
+          That container renders {isExpanded && children}, so anything inside it is
+          UNMOUNTED when somebody collapses "Other" — which, while the overlay lived beside
+          the button, destroyed a running tour mid-flight. It renders nothing in place (the
+          overlay is a portal on document.body), so it costs this section no layout, and it
+          keeps the fork's overlaid-file count at one. */}
+      <EscTourMount />
     </NavigationDrawerSection>
   );
 };

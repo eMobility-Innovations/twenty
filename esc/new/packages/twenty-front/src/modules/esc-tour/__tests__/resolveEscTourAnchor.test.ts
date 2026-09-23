@@ -1,3 +1,4 @@
+import { escTourObjectAnchor } from '@/esc-tour/constants/escTourSteps';
 import { type EscTourStep } from '@/esc-tour/types/EscTourStep';
 import {
   resolveEscTourAnchor,
@@ -12,6 +13,10 @@ const buildDocument = (html: string): HTMLElement => {
 
   return container;
 };
+
+// A real view id off the production workspace's shape. The sidebar carries one on every
+// object link the moment an index view exists, which is always, in practice.
+const VIEW_ID = '6f1f4d2a-9b3e-4f7a-8c21-0d9e5b7a3c14';
 
 describe('resolveEscTourAnchor', () => {
   afterEach(() => {
@@ -75,6 +80,125 @@ describe('resolveEscTourAnchor', () => {
     const resolved = resolveEscTourAnchor(step, container);
 
     expect(resolved.element?.tagName).toBe('A');
+  });
+
+  // An unparseable selector makes querySelector THROW, not return null. Before this was
+  // handled, one typo in the script would have white-screened the CRM the moment somebody
+  // pressed Tour, instead of costing a single step.
+  it('reports a selector the browser cannot parse as missing instead of throwing', () => {
+    const container = buildDocument('<a href="/objects/people">p</a>');
+    const step: EscTourStep = {
+      id: 'broken',
+      title: 'T',
+      body: 'B',
+      anchor: 'a[href=',
+    };
+
+    expect(() => resolveEscTourAnchor(step, container)).not.toThrow();
+    expect(resolveEscTourAnchor(step, container).isMissing).toBe(true);
+  });
+
+  it('reports an unparseable anchorAncestor as the anchor itself, not as a throw', () => {
+    const container = buildDocument(
+      '<div><a href="/objects/people">p</a></div>',
+    );
+    const step: EscTourStep = {
+      id: 'sidebar',
+      title: 'T',
+      body: 'B',
+      anchor: 'a[href="/objects/people"]',
+      anchorAncestor: 'div[',
+    };
+
+    expect(() => resolveEscTourAnchor(step, container)).not.toThrow();
+    expect(resolveEscTourAnchor(step, container).element?.tagName).toBe('A');
+  });
+});
+
+// This is the shape the product actually renders. `getAppPath` appends `?viewId=<uuid>` to
+// every object link as soon as a view id exists for that object — which it does once the
+// object has an index view, and permanently per browser once somebody has opened that list
+// (the last-visited view is kept in localStorage). An exact-match anchor matched a
+// brand-new workspace and nothing afterwards.
+describe('escTourObjectAnchor', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('resolves a link that carries a viewId query string', () => {
+    const container = buildDocument(
+      `<a href="/objects/people?viewId=${VIEW_ID}">People</a>`,
+    );
+
+    const resolved = resolveEscTourAnchor(
+      {
+        id: 'people',
+        title: 'T',
+        body: 'B',
+        anchor: escTourObjectAnchor('people'),
+      },
+      container,
+    );
+
+    expect(resolved.isMissing).toBe(false);
+    expect(resolved.element?.getAttribute('href')).toBe(
+      `/objects/people?viewId=${VIEW_ID}`,
+    );
+  });
+
+  it('still resolves the bare link a workspace with no index view renders', () => {
+    const container = buildDocument('<a href="/objects/people">People</a>');
+
+    const resolved = resolveEscTourAnchor(
+      {
+        id: 'people',
+        title: 'T',
+        body: 'B',
+        anchor: escTourObjectAnchor('people'),
+      },
+      container,
+    );
+
+    expect(resolved.isMissing).toBe(false);
+    expect(resolved.element?.tagName).toBe('A');
+  });
+
+  // The reason the selector is `^="/objects/people?"` and not `^="/objects/people"`: a bare
+  // prefix would light up a different list and the person would be told it was People.
+  it('does not match a longer route that merely starts with the same letters', () => {
+    const container = buildDocument(
+      `<a href="/objects/peoplefoo?viewId=${VIEW_ID}">Not people</a>`,
+    );
+
+    const resolved = resolveEscTourAnchor(
+      {
+        id: 'people',
+        title: 'T',
+        body: 'B',
+        anchor: escTourObjectAnchor('people'),
+      },
+      container,
+    );
+
+    expect(resolved.isMissing).toBe(true);
+  });
+
+  it('does not match a record page under the same object', () => {
+    const container = buildDocument(
+      '<a href="/objects/people/6f1f4d2a-9b3e-4f7a-8c21-0d9e5b7a3c14">A person</a>',
+    );
+
+    const resolved = resolveEscTourAnchor(
+      {
+        id: 'people',
+        title: 'T',
+        body: 'B',
+        anchor: escTourObjectAnchor('people'),
+      },
+      container,
+    );
+
+    expect(resolved.isMissing).toBe(true);
   });
 });
 

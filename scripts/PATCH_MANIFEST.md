@@ -11,7 +11,7 @@ upstream checkout (backing up originals to `.esc-originals/`); re-running
 - **Branch:** `esc/enterprise-sso-overlay`
 - **Upstream base:** `eMobility-Innovations/twenty` @ `emobility-unity` (a fork of
   `twentyhq/twenty`), Twenty **v2.0.x** line.
-- **Last updated:** 2026-09-09
+- **Last updated:** 2026-09-23
 - **Status:** LIVE. Option B (compiled patches on the official image) is what runs on
   CT 175 as `twenty-esc-sso:*`. The "scaffold only, image NOT yet built" line that stood
   here was true on 2026-06-04 and wrong from 2026-06-05 onward — the image was built and
@@ -22,7 +22,7 @@ upstream checkout (backing up originals to `.esc-originals/`); re-running
 ## Overview
 
 ESC runs a self-hosted Twenty instance (`esc.crm.fiszu.com`, CT 175 stack
-`twenty-esc`). On Twenty **v2.0** the only customization we need is **one**:
+`twenty-esc`). On Twenty **v2.0** the fork carries **three** customizations, no more:
 
 1. **Enterprise feature unlocking (SSO)** — remove the Organization-license gate
    so SAML / generic-OIDC SSO (our **Keycloak** `fiszu` realm) and the SSO settings
@@ -42,6 +42,10 @@ ESC runs a self-hosted Twenty instance (`esc.crm.fiszu.com`, CT 175 stack
    ONE customer's interest profile by calling `twenty-ingest` on CT 175. The alternative
    was publishing that endpoint on the public internet, a larger exposure than naming one
    host here.
+
+3. **A guided tour** — a "Tour" entry in the CRM sidebar that walks a new person through
+   the product (Redmine #19873). One upstream file overlaid, everything else in ESC-owned
+   code under `esc/new/`. Category 3 below.
 
 That is the entire patch surface today. Everything else is upstream-stock.
 
@@ -282,6 +286,65 @@ and its hashed assets came from the same build. **It cannot prove the tour RUNS*
 nothing that greps a bundle can. A person clicking Tour in a browser is the proof, and it is
 a numbered step of the deploy in `esc/deploy/DEPLOY.md`.
 
+### The gate that guards the overlaid file
+
+Two checks in `verify.sh` stand behind Category 3, and they answer different failures:
+
+1. **The overlay-orphan check** (`gate: the ESC overlay must still line up with upstream`).
+   `esc-apply.sh` cannot tell a rename from a new file: when an upstream sync MOVES or
+   DELETES `NavigationDrawerOtherSection.tsx`, the overlay copy still applies — to a path
+   nothing reads any more, and the build succeeds with no Tour button in it. The check is a
+   pure path-existence test, so it runs anywhere a checkout does, and it turns that silent
+   loss into a refused push.
+
+2. **The `esc-tour` gate** (`gate: the ESC tour must carry its own checks`). It runs the
+   module's six jest suites. Because the tour's code does not sit at a normal package path —
+   `esc/new/` adds it and one upstream file is overlaid — the suite cannot be run where the
+   files sit, so the gate has to apply the overlay INTO `packages/` first. It therefore:
+   refuses on a tree with uncommitted changes under `packages/` (restoring would delete
+   somebody's work); applies, runs and restores under a `trap`, so a failing test still puts
+   the tree back; and fails if `packages/` is not clean afterwards rather than leaving the
+   mess for the next command.
+
+   **It used to be a gate that could not run.** No checkout carries twenty-front's
+   dependencies and the shared gate runner does not install them, so it skipped on every host
+   it had ever run on. It now runs the suite inside the front-build image
+   (`ESC_TOUR_RUNNER_IMAGE`, default `esc-front-build:tour2`) when `node_modules` is absent,
+   bind-mounting the working tree's tour sources and the overlaid file over the image's baked
+   copies — so what is checked is what you are about to push, not what was compiled weeks ago.
+   With neither dependencies nor the image it skips **loudly, by name**, saying in the same
+   breath how to build the image.
+
+The suite holds the properties above as tests, not as intentions: a step whose anchor is
+missing is skipped and named (mutation-tested — remove the guard in
+`selectShowableEscTourSteps` and the test fails), and no step may anchor on a generated class
+name.
+
+### Maintenance cost of this category
+
+One overlaid file is the whole recurring bill, and it is a **frontend** file, which behaves
+differently from the two server patches above:
+
+- On every upstream sync, re-copy the fresh upstream `NavigationDrawerOtherSection.tsx` into
+  `esc/overlay/…` and re-apply the two hunks (one import, one `<EscTourNavigationDrawerItem />`
+  placed first in the section). Do not carry the old copy forward — that is how a fork silently
+  reverts an upstream fix to the navigation drawer.
+- If upstream moves or renames the file, the overlay-orphan check refuses the push. Re-point
+  the overlay at the new path, update `scripts/esc-modified-files.txt`, and say so here.
+- If upstream ever grows a real extension point for sidebar entries, **delete this overlay and
+  use it.** The overlay exists only because none exists today.
+- `esc/new/**` costs nothing at sync time: upstream has never seen those paths, so there is
+  nothing to reconcile. Keeping the tour's own code there, and the overlay down to one file, is
+  the entire reason this category is survivable.
+- **No new npm dependency, ever.** `package.json` and `yarn.lock` are not allowlisted by
+  `verify.sh`'s fork-scope check; a tour library would put a permanent divergence in both.
+
+### State
+
+Built and gated in this repo. Delivered as the front-only layer
+`twenty-esc-sso:v2.0.0-tour1` over `twenty-esc-sso:v2.0.0-ssrf1`; the deploy, and the rollback
+tarball that backs it, are in `esc/deploy/DEPLOY.md`, section *2026-09-22c*.
+
 ## Licensing / legal (AGPLv3)
 
 - Twenty is **AGPLv3**. Modifying it and self-hosting is permitted; AGPL §13 only
@@ -320,7 +383,8 @@ Do **not** touch the separate `twenty-rc` (v1.17) stack on CT 175 — only `twen
 
 ## File index
 
-- `esc/overlay/` — patched upstream files (mirror upstream paths). Currently one file.
+- `esc/overlay/` — patched upstream files (mirror upstream paths). Currently THREE files;
+  `scripts/esc-modified-files.txt` is the flat list and must match this directory exactly.
 - `esc/esc-apply.sh` — overlay installer / re-apply-after-upgrade.
 - `scripts/verify-esc-features.sh` — post-apply verification.
 - `scripts/esc-modified-files.txt` — flat list of touched upstream files.
