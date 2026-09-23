@@ -23,3 +23,6 @@ packages/twenty-server/src/engine/core-modules/secure-http-client/utils/is-priva
 
 # Category 3 — the guided tour: one import, one element in the sidebar's "Other" section
 packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx
+
+# Category 4 — the node base image, pinned by digest to production's 24.15.0
+packages/twenty-docker/twenty/Dockerfile

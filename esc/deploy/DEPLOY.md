@@ -248,15 +248,22 @@ production actually returns.
 `build-source-image.sh` now runs the boot smoke test before it calls an image good. `SKIP_BOOT_SMOKE=1`
 exists and says loudly, by name, that the image was not booted.
 
-### Correction to the earlier handover — and a correction to that correction
+### Where the build checkouts on CT140 are — and a correction to a correction
 
-An earlier handover said the build host's checkout is at `/root/twenty-esc-src` on CT140. There is
-no checkout at **that** path, and the smoke-test scripts above were run from `/root/esc-smoke/`,
-copied in and checksum-matched.
+CT140 has **two** checkouts and both exist. Verified 2026-09-23 with `sudo`:
 
-**CT140 does have a checkout, and it is the build checkout: `/root/twenty-tour-src`.** That is
-where the frontend is built — step 2 of the tour deploy below. The flat claim "CT140 has no
-checkout" was true only of the wrong path, and believing it costs a re-clone that is not needed.
+- `/root/twenty-esc-src` — the SOURCE-build checkout (option A, `build-source-image.sh`).
+- `/root/twenty-tour-src` — the FRONT-only build checkout, used by the tour deploy below.
+
+An earlier revision of this section claimed `/root/twenty-esc-src` did not exist, and that was
+wrong. The probe behind the claim was `pangolin ssh … -- 'cd /root/twenty-esc-src && …'`, run as
+the login user, who cannot read `/root`: the `cd` failed, the `&&` short-circuited, and the
+fallback branch printed "NO CHECKOUT". `ls -d /root/*twenty*` failed the same way a moment later,
+because the shell that expands the glob is the login user's, not root's — an unexpanded literal
+path, not an empty directory.
+
+**Anything touching `/root` on a CT goes inside `sudo sh -c '…'`**, glob and all, or it reports the
+absence of a thing that is there. Two separate conclusions in this file came from that one trap.
 
 ---
 

@@ -53,6 +53,20 @@ if [ -d esc/overlay ]; then
   echo "esc-overlay: every overlay file still has its upstream target — good."
 fi
 
+echo "gate: the deploy scripts must carry their own tests"
+
+# ---------------------------------------------------------------------------
+# These are the scripts that stand between a bad image and production: the boot smoke
+# test, the behavioural enterprise check and its probe, the frontend collapse check,
+# the overlay verifier and the tree guard. Two of them replaced greps that were wrong
+# in opposite directions — one could not fail, one failed on correct input — so their
+# own correctness is not a detail.
+#
+# It runs HERE, unconditionally, with no `node_modules` and no datastores, which is the
+# point: the wizard's jest suite below skips itself on the shared gate runner, so
+# without this the runner's verdict covered no code at all.
+./esc/deploy/tests/run-tests.sh
+
 echo "gate: the ESC onboarding wizard must carry its own checks"
 
 # ---------------------------------------------------------------------------
