@@ -99,6 +99,18 @@ describe('EscTourNavigationDrawerItem', () => {
     addedNodes.push(drawer);
   };
 
+  // The workspace-name step anchors on the workspace switcher's own test id
+  // (MultiWorkspaceDropdownClickableComponent.tsx:31). It is route-less, so it is judged at
+  // open() like the sidebar step beside it — a fixture that leaves it out makes the
+  // every-anchor-resolves test fail for a reason that has nothing to do with the tour.
+  const putWorkspaceSwitcherOnThePage = () => {
+    const switcher = document.createElement('div');
+
+    switcher.setAttribute('data-testid', 'workspace-dropdown');
+    document.body.appendChild(switcher);
+    addedNodes.push(switcher);
+  };
+
   const putRouteLinksOnThePage = (routes: string[]) => {
     for (const route of routes) {
       const link = document.createElement('a');
@@ -238,6 +250,7 @@ describe('EscTourNavigationDrawerItem', () => {
       .mockImplementation(() => undefined);
 
     putNavigationDrawerOnThePage();
+    putWorkspaceSwitcherOnThePage();
     putRouteLinksOnThePage([
       'people',
       'companies',
