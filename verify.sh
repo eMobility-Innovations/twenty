@@ -109,10 +109,40 @@ echo "gate: the ESC tour must carry its own checks"
 # class name.
 #
 # SKIPS LOUDLY, BY NAME, WHEN IT CANNOT RUN — same discriminator as the gates either side.
-if [ ! -d node_modules ]; then
-  echo "esc-tour: SKIPPED — node_modules is absent in this checkout, so the suite" >&2
-  echo "esc-tour:   cannot be run by anyone from here. THIS RUN DID NOT CHECK THE TOUR." >&2
-  echo "esc-tour:   Run ./verify.sh on a clone with dependencies installed." >&2
+#
+# WITH NO node_modules IT RUNS IN THE BUILD IMAGE RATHER THAN SKIPPING. The tour suite had
+# never been executed anywhere: no checkout carries twenty-front's dependencies and the
+# shared gate runner does not install them, so this gate skipped on every host it had ever
+# run on — a gate that cannot run is not a gate. `build-front-layer.sh --front-only` already
+# produces an image that HAS those dependencies, so when one is present the suite runs
+# inside it, against the CURRENT working tree: the tour sources and the one overlaid
+# upstream file are bind-mounted over the image's baked-in copies, so what is checked is
+# what you are about to push, not what was compiled into the image weeks ago.
+ESC_TOUR_RUNNER_IMAGE="${ESC_TOUR_RUNNER_IMAGE:-esc-front-build:tour2}"
+ESC_TOUR_DOCKER="${ESC_TOUR_DOCKER:-docker}"
+
+esc_tour_runner_image_present() {
+  command -v "${ESC_TOUR_DOCKER%% *}" >/dev/null 2>&1 &&
+    ${ESC_TOUR_DOCKER} image inspect "${ESC_TOUR_RUNNER_IMAGE}" >/dev/null 2>&1
+}
+
+if [ ! -d node_modules ] && esc_tour_runner_image_present; then
+  echo "esc-tour: no node_modules here — running the suite inside ${ESC_TOUR_RUNNER_IMAGE}"
+  ${ESC_TOUR_DOCKER} run --rm \
+    -v "$(pwd)/esc/new/packages/twenty-front/src/modules/esc-tour:/app/packages/twenty-front/src/modules/esc-tour:ro" \
+    -v "$(pwd)/esc/overlay/packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx:/app/packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx:ro" \
+    -w /app/packages/twenty-front \
+    "${ESC_TOUR_RUNNER_IMAGE}" \
+    npx jest esc-tour --config=jest.config.mjs
+  echo "esc-tour: the tour suite passed inside ${ESC_TOUR_RUNNER_IMAGE}."
+elif [ ! -d node_modules ]; then
+  echo "esc-tour: SKIPPED — node_modules is absent in this checkout AND the runner image" >&2
+  echo "esc-tour:   ${ESC_TOUR_RUNNER_IMAGE} is not present, so the suite cannot be run by" >&2
+  echo "esc-tour:   anyone from here. THIS RUN DID NOT CHECK THE TOUR." >&2
+  echo "esc-tour:   Either run ./verify.sh on a clone with dependencies installed, or build" >&2
+  echo "esc-tour:   the runner image once on a host with room:" >&2
+  echo "esc-tour:     REACT_APP_SERVER_BASE_URL= ESC_FRONT_BUILD_IMAGE=${ESC_TOUR_RUNNER_IMAGE} \\" >&2
+  echo "esc-tour:       ./esc/deploy/build-front-layer.sh --front-only" >&2
 elif [ -n "$(git status --porcelain -- packages/ 2>/dev/null)" ]; then
   echo "esc-tour: SKIPPED — packages/ has uncommitted changes, and this gate has to" >&2
   echo "esc-tour:   apply the overlay into packages/ and then restore it. Restoring over" >&2
