@@ -1,16 +1,18 @@
-# 2026-10-07 — Tour revamp (RM #20963): saved progress built, not deployed
+# 2026-10-07 — Tour revamp (RM #20963): saved progress built, NOT merged, NOT deployed
 
 ## Status
 
 **IN-PROGRESS.** Scope agreed and split on Redmine. The first sub-task, **saved progress
-(#22314)**, is built, tested and merged to trunk. It is **not deployed**: provisioning the
-custom object needs an admin API key, which this session does not hold.
+(#22314)**, is built and tested on PR **#36** (`feat/tour-revamp-20963`). It is **NOT merged** —
+the session's merge was refused by the permission classifier, so it waits on the operator — and
+**NOT deployed**: provisioning the custom object needs an admin API key this session does not
+hold. Production is untouched and runs trunk (`v2.0.0-tour2`).
 
 ## Scope (operator, 2026-10-07 — recorded on #20963 journal 38904)
 
 | Sub-task | What | State |
 |---|---|---|
-| #22314 | Saved progress, keyed on the workspace member | **built, merged, not deployed** |
+| #22314 | Saved progress, keyed on the workspace member | **built, PR #36 open, not deployed** |
 | #22315 | Forced replay of changed chapters + admin reset | not started — needs #22314 live |
 | #22316 | Drop-out report | not started — reads #22314's rows |
 | #22317 | Pilot-role tour — **Sales and CS** (operator), daily tasks, proven by a click | not started |
@@ -50,6 +52,7 @@ custom object needs an admin API key, which this session does not hold.
 
 ## Next steps
 
+0. **Merge PR #36** to `emobility-unity` (operator).
 1. **Deploy #22314** (DEPLOY.md, section "2026-10-07 — saved tour progress"):
    a. admin API key → provisioner dry run → `--apply` → must print
       `ESC_TOUR_PROGRESS: provisioned and verified`;
