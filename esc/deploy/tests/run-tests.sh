@@ -24,6 +24,7 @@ test-enterprise-probe.sh
 test-enterprise-behaviour.sh
 test-compare-dist-front.sh
 test-boot-smoke.sh
+test-provision-tour-progress.sh
 "
 
 FAILED_SUITES=""

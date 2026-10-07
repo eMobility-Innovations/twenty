@@ -437,3 +437,52 @@ CONTAINER=twenty-esc-server-1 ./scripts/verify-esc-image.sh
 Both lines 4 and 42, again — a rollback that moves only the server leaves the stack split the
 same way a half-done deploy does. The last check proves the enterprise bypass and the SSRF
 allowlist are back, which is the thing a rollback to the wrong image would quietly lose.
+
+## 2026-10-07 — saved tour progress (RM #22314)
+
+The tour now saves where each person is, so it follows them across devices and an admin can
+see who has finished it. It is stored in a **Twenty custom object, `escTourProgress`** — data in
+the workspace schema Twenty manages, NOT a table of ours. That is the whole reason it is
+shippable: the 2026-09-22 decision (RM #19873 journal 36187) dropped `core."escOnboarding"`
+because a fork migration never runs on an existing instance. A custom object needs no
+migration and no server rebuild, so delivery is still the front-only layer above.
+
+### One extra step, BEFORE the image swap
+
+Create the object once, with an **admin** API key (it needs data-model rights). Dry run first —
+it prints the plan and writes nothing:
+
+```sh
+# on CT175, inside the server container (it has node), against its own port — not the SSO edge
+P=/root/twenty-tour-src/esc/deploy/provision-esc-tour-progress.cjs
+sudo docker exec -i -e TWENTY_URL=http://localhost:3000 -e TWENTY_API_KEY=<admin key> \
+  twenty-esc-server-1 node - < "$P"              # plan only
+sudo docker exec -i -e TWENTY_URL=http://localhost:3000 -e TWENTY_API_KEY=<admin key> \
+  twenty-esc-server-1 node - --apply < "$P"      # writes, then reads back
+```
+
+It must end with `ESC_TOUR_PROGRESS: provisioned and verified`. It is idempotent — a second
+`--apply` writes nothing. It also **removes the sidebar entry Twenty adds for every new
+object**, for everyone (`object-metadata.service.ts:515`); only workspace-level entries that
+target this object's id are removed, never a personal one.
+
+### Order does not matter for safety, only for usefulness
+
+The frontend **fails soft**: if the object is not there, or a role cannot write it, saved
+progress turns itself off for that page load with ONE console warning
+(`[esc-tour] saved progress is off for this page load: …`) and the tour runs exactly as before,
+resuming from the tab's own sessionStorage. So a swap before provisioning breaks nothing — it
+just records nothing until the object exists.
+
+### Proving it works
+
+1. As yourself, click Tour, go a few steps, close the tab.
+2. Open the CRM in another browser and click Tour — it resumes at that step.
+3. Settings → Data model → Tour progress (or `/objects/escTourProgresses`): your row shows
+   `inProgress`, `lastStepId`, `furthestStepIndex`. Finish the tour; it reads `completed` with a
+   `completedAt`.
+
+### Rollback
+
+Swap the image back as above. The object can stay — nothing reads it but the tour. To remove
+it entirely: Settings → Data model → Tour progress → deactivate, then delete.
