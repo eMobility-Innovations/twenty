@@ -58,6 +58,9 @@ else
 fi
 set -uo pipefail
 
+# Preserve an upstream validation caller; ordinary commits name their hook.
+export CLAUDE_GATE_INITIATOR="${CLAUDE_GATE_INITIATOR:-commit-hook}"
+
 # HOME is NOT guaranteed. A commit made by a systemd service has no HOME, and
 # `set -u` turned a bare $HOME into a hard failure — so this gate, which is
 # designed to be inert when the checker is missing, instead blocked a compliant
@@ -693,6 +696,50 @@ elif ! python3 "$CONFLICT_GUARD" --check "$ROOT"; then
   exit 1
 fi
 
+# ── the mutation-residue gate — a DELIBERATELY BROKEN guard must not reach the trunk ──
+# A mutation harness edits a real source file to prove the suite notices a guard going
+# away. The edit is meant to be transient. It is not always: run-tests.sh kills a timed-out
+# test with `kill -9` on the process GROUP, SIGKILL runs no trap, and the payload stays in
+# the checkout. REPRODUCED 2026-09-05 — live in the tree 10s into a run, still there after
+# the kill. Four checkouts on one workstation were carrying one that day; nothing
+# distinguishes a mutation from an ordinary edit, and `git status` says only "modified".
+#
+# THE SAME GUARD ci/validate.py ALREADY RUNS, pointed at the repo being committed instead of
+# only at this one. It was blind to that scar for one reason: it looked for `tests/mutate_*.sh`
+# in ITS OWN checkout, and claude-code-config writes `claude/hooks/mutate-*.sh` and
+# `*-mutations.sh`. Widening the corpus and letting it take a --root is the whole change; a
+# second guard beside it would have been the defect, not the fix.
+#
+# WHY THIS IS SAFE IN AN ESTATE-WIDE CHAIN. The corpus is the committing repo's OWN
+# harnesses. A repo with none exits 0 having printed nothing — measured at 0.07s on repos
+# with no harness and 0.27s on the one that has them, so it costs nothing on any commit.
+MUTRES_GUARD="$(_policy_bin mutation-residue-guard.py)"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$MUTRES_GUARD" ]; then
+  guard_unreachable "mutation-residue gate — the one that refuses a deliberately broken guard" \
+                    "not found at $MUTRES_GUARD"
+else
+  python3 "$MUTRES_GUARD" --root "$ROOT"; MUTRES_RC=$?
+  # A DISARM SWITCH, because this block runs on EVERY commit in EVERY repo on every machine.
+  # The verdict is still printed; only its power to block is dropped, so a bad day for this
+  # guard is a noisy commit rather than an estate that cannot commit at all:
+  #     CLAUDE_MUTATION_RESIDUE_GUARD=off git commit ...
+  if [ "${CLAUDE_MUTATION_RESIDUE_GUARD:-enforce}" = "off" ] && [ "$MUTRES_RC" != 0 ]; then
+    echo "mutation-residue gate: DISARMED by CLAUDE_MUTATION_RESIDUE_GUARD=off — the finding" >&2
+    echo "                       above stands, and this commit is being allowed anyway." >&2
+    MUTRES_RC=0
+  fi
+  if [ "$MUTRES_RC" = 2 ]; then
+    echo "COMMIT BLOCKED — the mutation-residue guard ITSELF could not reach a verdict, so" >&2
+    echo "nothing here says the commit is clean. Fix the guard, do not bypass it." >&2
+    exit 1
+  elif [ "$MUTRES_RC" != 0 ]; then
+    echo "Do not bypass with --no-verify — this text was written by a mutation harness to" >&2
+    echo "BREAK a guard on purpose, and committing it ships exactly the defect that guard" >&2
+    echo "exists to catch." >&2
+    exit 1
+  fi
+fi
+
 # ── the assertion-pipe-inversion gate — WARN ONLY, deliberately ──────────────────────
 # Sibling of policies/pipeline-status.py: that one refuses a MASKED exit status read as
 # success, this one refuses a status REPLACED by an innocent bystander's death.
@@ -977,6 +1024,48 @@ if [ "$_b32_hits" -gt 0 ]; then
   if [ "$BASH32_SET_U_LINT_BLOCKING" = "1" ]; then
     exit 1
   fi
+fi
+
+# ── THE SUITE-DURATION CEILING — one budget, every repo, not raisable ────────
+#
+# THE OPERATOR'S INSTRUCTION, 2026-09-25: "NO LIMIT INCREASES, get your code OPTIMISED and
+# fit within limits... WE NEED TO ENFORCE COMPATIBILITY AND EFFECTIVENESS AND ECONOMY AT A
+# SINGLE CHOKE POINT". PFM_MERGE_SUITE_TIMEOUT had been raised twice and a third was being
+# asked for. A raise is invisible to everyone except the next person who waits.
+#
+# WHY HERE AND NOT IN THE PER-REPO HOOK. This rail runs from the policy runtime for every
+# repo, so the ceiling reaches all of them the moment the runtime converges — no repo has to
+# refresh its own `.githooks/pre-push` first. Adding it as a TEMPLATE capability instead is
+# what caused the 2026-09-25 lockout: 529 gated checkouts lacked the new capability and
+# their pushes were refused for not having it.
+#
+# INERT TODAY. `policy/suite-duration-ceiling.json` ships `armed: false`, so this prints and
+# exits 0 — three repos are over the proposed 900s and arming on landing would refuse their
+# commits before anyone had a chance to optimise. Arming is a separate, reviewable commit.
+# An UNMEASURED repo is UNKNOWN and is never refused and never called compliant.
+SUITE_CEILING="$(_policy_bin suite-duration-guard.py)"
+if [ -z "$HOME_DIR" ] || [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$SUITE_CEILING" ]; then
+  guard_unreachable "suite-duration ceiling — the one that refuses a suite nobody optimised" \
+                    "not found at $SUITE_CEILING"
+else
+  # 🔴 THE REPO'S NAME, NOT THE DIRECTORY'S. `basename "$ROOT"` was wrong and was caught
+  # by running the rail for real: in a worktree it answers `ccp-suite-ceiling`, so the guard
+  # looked up a name no measurement exists for and reported UNKNOWN. Most commits in this
+  # estate are made from worktrees, so that is the ceiling blind exactly where it is needed.
+  # The REMOTE names the repository, and it is the same for every worktree of it.
+  _sdc_url="$(git -C "$ROOT" config --get remote.origin.url 2>/dev/null)"
+  _sdc_name="$(basename "${_sdc_url%.git}")"
+  [ -n "$_sdc_name" ] || _sdc_name="$(basename "$ROOT")"
+  # ⛔ REPORT ONLY HERE, FOREVER, AND NOT BECAUSE THE DECLARATION IS INERT.
+  # This rail runs at COMMIT time, where the only measurement available is the median of
+  # past primes -- 402 samples at 1110s for ccp. A session that had just optimised the
+  # suite to 600s would still be judged on those 402, and the only thing that records a new
+  # measurement is a prime, which needs a merge, which needs this commit. That is a
+  # deadlock of exactly the shape the 2026-09-25 gate lockout had.
+  # The ceiling REFUSES at the MERGE, in policies/merge-result.py, against the suite
+  # duration the prime measured for THAT TREE. `|| true` is the whole of this comment made
+  # executable, and test_the_precommit_rail_can_never_refuse pins it.
+  python3 "$SUITE_CEILING" --check "$_sdc_name" || true
 fi
 
 # NO-OP WHEN THIS FILE IS RUN AS A SUBPROCESS, and that is not an oversight: a
