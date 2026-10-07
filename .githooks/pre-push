@@ -20,6 +20,91 @@
 
 set -uo pipefail
 
+# Attribute ordinary pushes while retaining an explicitly named upstream caller.
+export CLAUDE_GATE_INITIATOR="${CLAUDE_GATE_INITIATOR:-pre-push}"
+
+#: 🔴 `HOME` DEFINED-BUT-EMPTY, BEFORE ANY USE, AND THIS IS THE CLASS FIX RATHER THAN SEVEN
+#: SPOT FIXES. Under `set -u` a bare `$HOME` ABORTS this hook outright wherever HOME is
+#: unset — a systemd unit, `pct exec`, `env -i`, cron with no login shell — and the abort
+#: happens before anything is measured, so the push dies with a one-line shell error and no
+#: verdict. It is invisible from every shell a human would test from, because an
+#: interactive shell always has HOME. Reproduced 2026-09-21 on BOTH darwin and linux:
+#:
+#:     $ env -i /bin/bash -c 'set -u; : "${CLAUDE_POLICY_PRIMER:-$HOME/x}"'
+#:     line 1: HOME: unbound variable        (rc=1, both platforms)
+#:
+#: WHY HERE AND NOT AT EACH SITE. This file had SEVEN bare uses and a first pass guarded
+#: only the one that had been reported, which is the instance fix this estate keeps paying
+#: for: the other six were found afterwards by counting the class, and the eighth would be
+#: written next month by someone who never read this comment. One assignment at the top
+#: cannot be forgotten by a later edit.
+#:
+#: IT CHANGES NOTHING WHERE HOME IS SET — `:=` assigns only when unset or empty. Where it
+#: is unset, every dependent path becomes an absolute path under `/` that cannot exist, so
+#: the `-f`/`-x`/`-n` tests already guarding each leg make that leg INERT instead of fatal.
+#: Inert is what this hook promises on a machine with no policy runtime.
+: "${HOME:=}"
+
+#: AND THEN TRY TO GET IT BACK, because "does not abort" is not "works". With HOME empty
+#: every path below resolves under `/`, every `-f`/`-x` guard fails, and this hook exits 0
+#: having gated NOTHING — a gate that silently is not there. The passwd database knows the
+#: answer even when the environment does not. Measured 2026-09-14 on github-access-manager:
+#: its panel pushes the access manifest from a systemd unit with no HOME, and from 07:48
+#: every push aborted here, two manifest commits sat local on CT243, and the audit trail
+#: quietly stopped existing for anyone reading it on GitHub.
+#:
+#: STILL INERT WHERE IT CANNOT BE ANSWERED — `getent` is glibc/musl, absent on darwin, and
+#: a machine with no passwd entry for its own uid gets an empty answer. Both leave HOME as
+#: it was, which is the path this template already promises on a machine with no policy
+#: runtime. Failure of the lookup is never a failure of the push.
+#: THE NORMALISATION ABOVE APPEARS EXACTLY ONCE IN THIS FILE, INCLUDING IN COMMENTS, and
+#: this block deliberately does not repeat it. tests/mutate_gate_template_home_guard.sh
+#: proves that guard by deleting the assignment and checking it is GONE by grep, so a
+#: second copy ANYWHERE — code or prose — makes the mutation report "did not land" and the
+#: guard silently stops being proven. Cost two runs on 2026-09-21; the second copy was in
+#: a comment saying this.
+if [ -z "$HOME" ] && command -v getent >/dev/null 2>&1; then
+  _pp_home="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+  [ -n "$_pp_home" ] && HOME="$_pp_home"
+  unset _pp_home
+fi
+export HOME
+
+#: 🔴 THE GATE BODY RESOLVES ITS GUARDS FROM THE INSTALLED RUNTIME, NOT A DEV CHECKOUT.
+#:
+#: The shim that execs this file already resolves THE BODY from `$CLAUDE_POLICY_RUNTIME`
+#: — a self-converging clone — so one edit here reaches every shim-carrying repo at its
+#: next push with nothing vendored. Five guards below then threw that guarantee away by
+#: naming `$HOME/Projects/claude-code-policy/bin/` directly, which is a DEVELOPER WORKING
+#: CHECKOUT and mutable by design.
+#:
+#: MEASURED 2026-09-25, and it cost two PRs of guessing. ccp#3087 and #3088 fixed
+#: `repo-contract-guard`'s predicate; pfm#1634 was refused at 11:34:19Z with the pre-fix
+#: message anyway and was recorded as proof that both fixes were inert. Neither was: the
+#: checkout sat at `b47809a6` — an ancestor of #3087 — and fast-forwarded to `a3480d82`
+#: only at 11:36:11Z, 1 min 52 s AFTER that refusal. Measured gaps between consecutive
+#: fast-forwards that day reached 53 minutes, so for up to an hour after any guard fix
+#: reaches trunk, five of the eight guards on every push in the estate ran the old code
+#: and nothing said so.
+#:
+#: THE SAME SCAR, THE SAME FIX, LIFTED VERBATIM. `bin/org-precommit-gates.sh` and
+#: `templates/githooks-pre-commit` were moved onto exactly this resolver on 2026-08-19
+#: (see tests/test_gates_resolve_from_the_installed_runtime.py for that day's
+#: measurements). The pre-PUSH body was the straggler. `_policy_bin` is copied byte for
+#: byte rather than reimplemented, so the two can be compared and one test helper drives
+#: both.
+#:
+#: RUNTIME FIRST, CHECKOUT SECOND, RESOLVED PER GUARD — a root that happens to exist is
+#: not one carrying the guard being asked for. Inert-when-genuinely-absent is UNCHANGED:
+#: every call site below still guards on `[ -x ]`, because failing the push on a machine
+#: that has neither copy would make this a gate everyone must bypass.
+HOME_DIR="${HOME:-}"
+_policy_bin() {
+  _pb_rt="${CLAUDE_POLICY_RUNTIME:-$HOME_DIR/.claude/policy-runtime}/bin/$1"
+  _pb_co="$HOME_DIR/Projects/claude-code-policy/bin/$1"
+  if [ -f "$_pb_rt" ]; then printf '%s' "$_pb_rt"; else printf '%s' "$_pb_co"; fi
+}
+
 # ---------------------------------------------------------------------------
 # 🔴 DRAIN STDIN FIRST — BEFORE ANY CHILD CAN STEAL IT.
 #
@@ -48,6 +133,74 @@ REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
 cd "$REPO_ROOT" || exit 1
 
 # ---------------------------------------------------------------------------
+# A REPO'S OWN DEVIATIONS — DECLARED, NOT FORKED.
+#
+# This body is shared: repos that carry `.githooks/pre-push` as a shim all run THIS file,
+# so one edit here reaches every one of them. That only works if a repo with a legitimate
+# local decision has somewhere to put it other than a private fork of all 713 lines —
+# which is exactly how the fleet ended up with 143 drifted copies and a rail that could
+# only safely refresh the untouched minority.
+#
+# `.githooks/pre-push.local` is that somewhere. It is sourced HERE: after REPO_ROOT and
+# the stdin drain (so it can read PUSH_REFS), and before any gate runs (so it can set the
+# knobs they read — SKIP_VERIFY / PANGOLIN_SKIP_VERIFY and their _REASON, and
+# CLAUDE_VERIFY_BYPASS_LOG).
+#
+# It is sourced, not executed, so it can define functions and set variables. It is the
+# repo's own tracked file and needs no permission from here — "allow them what they are".
+# Its absence is the normal case and costs one `[ -r ]`.
+#
+# ⚠️ WHAT IT CANNOT DO, said here because the wording that stood until 2026-09-22 invited
+# exactly this: it cannot OVERRIDE one of this file's own functions. That comment offered
+# "an override of _pp_gate" as an example, and `_pp_gate` has never existed in this
+# template at all — it was internal-knowledge-base's own function, from the custom hook it
+# carried BEFORE it moved onto the template. Worse than a dead example: every `_pp_*`
+# function here is defined BELOW this point, so a definition in the sourced file is
+# silently overwritten a few hundred lines later. A repo taking that example at its word
+# writes a function that never runs, and nothing anywhere says so. To change what a gate
+# DOES, use the executable `.githooks/pre-push-local` leg further down, which is called
+# rather than defined-over.
+# ---------------------------------------------------------------------------
+_pp_source_local() {
+	local _local="$REPO_ROOT/.githooks/pre-push.local"
+	[ -r "$_local" ] || return 0
+	echo "pre-push: sourcing this repo's own .githooks/pre-push.local" >&2
+	# shellcheck disable=SC1090
+	. "$_local"
+}
+_pp_source_local
+
+# ---------------------------------------------------------------------------
+# ⛔ THE ACCUMULATION CEILING — CHECKED HERE, BEFORE ANYTHING EXPENSIVE RUNS.
+#
+# Placed at this exact point deliberately: after the stdin drain and after
+# `.githooks/pre-push.local` (so a repo's own declaration is already in force),
+# and BEFORE the merge primer below and before any suite. A gate submission
+# costs a runner slot and up to GATE_TIMEOUT seconds of somebody else's queue;
+# whether this repo is 2,400 branches over its ceiling is knowable in 40ms of
+# `git for-each-ref`. Spending the runner to find out is the waste the operator
+# asked to end: "a straight answer rather than running a million tests for
+# nothing".
+#
+# INERT UNTIL ARMED, and inert where the rail is not installed. The ceiling
+# ships with `armed: false` in policy/accumulation-ceiling.json: it measures and
+# reports and refuses nothing until that flag is flipped in its own commit.
+#
+# FAILS OPEN BY CONSTRUCTION — the guard's own top level catches everything and
+# returns 0, so a bug in it can never hold up a push.
+# ---------------------------------------------------------------------------
+_pp_accumulation_ceiling() {
+	_acg="${CLAUDE_ACCUMULATION_GUARD:-${HOME:-}/.claude/policy-runtime/bin/accumulation-ceiling-guard.py}"
+	[ -f "$_acg" ] || return 0
+	command -v python3 >/dev/null 2>&1 || return 0
+	[ "${CLAUDE_ACCUMULATION_CEILING:-1}" = "1" ] || return 0
+	python3 "$_acg" --push --repo "$REPO_ROOT" </dev/null || return 1
+}
+if ! _pp_accumulation_ceiling; then
+	exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # 🔴 THE GATE MUST NOT INHERIT THIS PUSH'S GIT LOCATION.
 #
 # Git exports GIT_DIR and friends into EVERY hook, and they override both `cwd` and
@@ -72,6 +225,32 @@ cd "$REPO_ROOT" || exit 1
 # remembering — including checks written by someone who has never heard of this.
 unset GIT_DIR GIT_COMMON_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX \
       GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
+# ── PROSE REACHES main THROUGH THE QUEUE — operator Q3, 2026-10-06 ──
+# The CCP refusal proved out in #3471; this shared leg reaches enrolled repos with no
+# bin/ of their own. The runtime router borrows the train's docs-only prefixes and
+# exempts its landing (CLAUDE_TRUNK_PUSH_OK=1). Only its deliberate exit 1 refuses:
+# a missing router, an exception or another error status FAILS OPEN. Catch exceptions
+# around loading too — a broken runtime must not turn this leg into a blanket refusal.
+_pp_prose_route() {
+  local _route="${CLAUDE_PROSE_PUSH_ROUTE:-${HOME}/.claude/policy-runtime/bin/prose-push-route.py}"
+  [ -f "$_route" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  printf '%s\n' "$PUSH_REFS" | python3 -c '
+import runpy, sys
+sys.argv = sys.argv[1:]
+try:
+    runpy.run_path(sys.argv[0], run_name="__main__")
+except SystemExit as exc:
+    if isinstance(exc.code, int):
+        raise
+except Exception:
+    pass
+' "$_route" "$REPO_ROOT"
+  local _rc=$?
+  [ "$_rc" != "1" ]
+}
+_pp_prose_route || exit 1
 
 # ---------------------------------------------------------------------------
 # TAKE THE MERGE GATE'S VERDICT HERE, WHERE A WAIT IS AFFORDABLE.
@@ -128,7 +307,11 @@ unset GIT_DIR GIT_COMMON_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX \
         GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
   _pp_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
   [ -n "$_pp_root" ] || exit 0
-  _pp_primer="${CLAUDE_POLICY_PRIMER:-$HOME/.claude/policy-runtime/bin/prime-merge-validation.py}"
+  # `${HOME:-}`, NOT `$HOME` — see the identical fix in this repo's own .githooks/pre-push.
+  # This template is the SOURCE the converge rail writes into every gated repo, so the bare
+  # form was not one bug: 421 checkouts on this workstation carried it and 0 carried a guard
+  # (measured 2026-09-21). Under `set -u` an unset HOME aborts the hook outright.
+  _pp_primer="${CLAUDE_POLICY_PRIMER:-${HOME:-}/.claude/policy-runtime/bin/prime-merge-validation.py}"
   # INERT WHERE THE RAIL IS NOT INSTALLED: a clone on a machine with no policy
   # runtime pushes exactly as it did before this block existed.
   [ -f "$_pp_primer" ] || exit 0
@@ -347,6 +530,90 @@ _pp_record_intent() {
 _pp_check_ledger || true
 _pp_warn_idle_transport
 
+export PUSH_REFS
+export REPO_ROOT
+PP_LOCAL="$REPO_ROOT/.githooks/pre-push-local"
+
+_pp_local() {
+  _ppl_phase="$1"
+  [ -e "$PP_LOCAL" ] || return 0
+  if [ ! -x "$PP_LOCAL" ]; then
+    printf '\n' >&2
+    printf 'pre-push: %s exists but is not executable — REFUSING.\n' "$PP_LOCAL" >&2
+    printf '    A repo-local gate that cannot run is not permission to skip it.\n' >&2
+    printf '    chmod +x %s\n' "$PP_LOCAL" >&2
+    return 1
+  fi
+  "$PP_LOCAL" "$@" </dev/null
+  return $?
+}
+
+# ⛔ `before-gate` RUNS ABOVE THE BYPASS, AND THAT IS THE WHOLE MEANING OF ITS NAME.
+#
+# It used to sit just above the suite invocation, which put it BELOW the SKIP_VERIFY
+# hatch — so a
+# variable whose entire job is "do not run the SUITE" also switched off every repo-local
+# refusal. MEASURED 2026-09-22 on claude-code-config, whose `before-gate` leg closes direct
+# pushes to main:
+#
+#     old hand-written hook   SKIP_VERIFY=1 git push origin main   rc 1   REFUSED
+#     template as first shipped                                    rc 0   ALLOWED
+#
+# Its own suite caught it (`claude/scripts/test-trunk-push-guard.sh`), which is the test
+# doing exactly its job. A repo-local guard is not the suite and a suite bypass must not
+# reach it; a repo that wants its own leg bypassable gives that leg its own variable, the
+# way that one has CLAUDE_TRUNK_PUSH_OK.
+#
+# THE HATCH ITSELF IS UNCHANGED and still comes first for everything it already covered:
+# the suite, the guards below it, and the bypass log.
+#
+# ⛔ NEITHER THE SUITE NOR THE EMPTY-COMMIT CHECK IS NAMED IN THIS COMMENT, ON PURPOSE.
+# One of this repo's tests pins the ORDER of those two invocations with `str.index()` over
+# the raw file, so the FIRST occurrence of either name anywhere — code or prose — is what
+# it measures. Naming them here put both above the code they refer to and turned a correct
+# hook red, twice in a row, including in the comment written to warn about it. Same shape
+# as the HOME guard's grep anchor two hundred lines up: in this file, a comment is not free.
+_pp_local before-gate || exit $?
+
+# ── A PR THE TRAIN ALREADY LANDED CANNOT CARRY ANOTHER COMMIT ───────────────
+#
+# Measured twice in one day, five hours apart, and the second time it happened to
+# the session that had just written the lock about the first:
+#
+#   2026-09-21T23:01Z  queue-train-landed  ikb#3112   | batch landed on main
+#   2026-09-21T23:38Z  queue-pr-gone       ikb#3112   | PR is MERGED
+#   2026-09-22T10:43Z  queue-train-landed  ikb#3149
+#   2026-09-22T11:22Z  queue-pr-gone       ikb#3149   | PR is MERGED
+#
+# Four commits stranded, two rescue PRs, because `--enqueue` on a merged PR number
+# is refused outright. NOTHING FAILS while it happens: the push succeeds, the
+# branch still exists, and `gh pr view` says MERGED, which reads like success. The
+# only contrary evidence is one row in a trail nobody reads unless already
+# suspicious — so KNOWING the rule does not protect you, which is what the second
+# incident proves.
+#
+# ⛔ IT RUNS ABOVE THE BYPASS, DELIBERATELY, for the same reason `before-gate`
+# does. The hatch below means "do not run the suite"; it must not also mean "lose
+# these commits", and it is taken under pressure, which is exactly when this
+# mistake gets made.
+#
+# 🔴 IT FAILS **OPEN** when the forge cannot be read — a rate limit, an outage, no
+# `gh` on the machine. This estate trips GitHub's SECONDARY limit routinely and
+# "cannot ask" is not "merged". That is the opposite of how the rest of this hook
+# treats a check it cannot run, and the difference is which way the error falls:
+# here, failing open means not blocking honest work.
+_MPG="$(_policy_bin merged-pr-push-guard.py)"
+[ -f "$_MPG" ] || _MPG="$(command -v merged-pr-push-guard 2>/dev/null || printf '%s' "$_MPG")"
+if [ -x "$_MPG" ]; then
+  # PUSH_REFS is already drained at the top of this file and exported below; the
+  # guard reads it from the environment so nothing here can steal git's pipe a
+  # second time — the rc=141 scar this hook opens with.
+  if ! PUSH_REFS="$PUSH_REFS" "$_MPG" --push --repo "$REPO_ROOT" </dev/null; then
+    exit 1
+  fi
+fi
+
+
 # ---------------------------------------------------------------------------
 # THE ESCAPE HATCH IS LOUD *AND* LEAVES A TRACE.
 #
@@ -480,8 +747,8 @@ fi
 #
 # The producer is not known. Until it is, this is the only thing between an
 # empty commit and trunk, and it costs one `diff-tree` per pushed commit.
-_ECG="$(command -v empty-commit-guard 2>/dev/null || true)"
-[ -n "$_ECG" ] || _ECG="$HOME/Projects/claude-code-policy/bin/empty-commit-guard.py"
+_ECG="$(_policy_bin empty-commit-guard.py)"
+[ -f "$_ECG" ] || _ECG="$(command -v empty-commit-guard 2>/dev/null || printf '%s' "$_ECG")"
 if [ -x "$_ECG" ]; then
   # PUSH_REFS is already drained above; the guard reads it from the environment
   # so nothing here can steal git's pipe a second time.
@@ -499,8 +766,8 @@ fi
 # 2026-08-24, the same scan over the 23 gated repos cloned on a workstation
 # returns 18,394 occurrences, almost all documentation and test fixtures, and a
 # detector that fires on those is one everybody learns to bypass.
-_CPD="$(command -v client-public-dns-guard 2>/dev/null || true)"
-[ -n "$_CPD" ] || _CPD="$HOME/Projects/claude-code-policy/bin/client-public-dns-guard.py"
+_CPD="$(_policy_bin client-public-dns-guard.py)"
+[ -f "$_CPD" ] || _CPD="$(command -v client-public-dns-guard 2>/dev/null || printf '%s' "$_CPD")"
 if [ -x "$_CPD" ]; then
   # The repo name as the policy spells it, not the directory name: a worktree is
   # called `ccp-surface` and would otherwise silently stop being checked.
@@ -518,18 +785,91 @@ fi
 # day that refuses every push in the org on one afternoon. A repo enrolled on or after
 # that date is enforced from the day it is enrolled, which is the point: a NEW repo cannot
 # be created without all four.
-_RCG="$(command -v repo-contract-guard 2>/dev/null || true)"
-[ -n "$_RCG" ] || _RCG="$HOME/Projects/claude-code-policy/bin/repo-contract-guard.py"
+_RCG="$(_policy_bin repo-contract-guard.py)"
+[ -f "$_RCG" ] || _RCG="$(command -v repo-contract-guard 2>/dev/null || printf '%s' "$_RCG")"
 if [ -x "$_RCG" ]; then
   if ! "$_RCG" --check "$(git rev-parse --show-toplevel)" </dev/null; then
     exit 1
   fi
 fi
 
+# ── THE REPO-LOCAL EXTENSION POINT ───────────────────────────────────────────
+#
+# WHY IT EXISTS. `gate_hook_upgrade.upgrade()` writes only for PRISTINE-STALE or
+# ABSORBED, and that refusal is correct — overwriting a repo's own gate logic to install
+# uniformity deletes working policy. The defect was that there was then NO ROUTE AT ALL:
+# a repo graded CUSTOMISED is frozen against every future template change, for ever.
+# Measured 2026-09-21 across 151 repos: claude-code-config (99 residual code lines),
+# internal-knowledge-base (27) and github-access-manager (4).
+#
+# WHY THREE CALL SITES AND NOT ONE. The find that proposed this asked for a single hook
+# "after verify succeeds". That cannot host what those repos actually diverge on:
+#
+#   claude-code-config   a trunk-push guard that must refuse BEFORE the gate is spent,
+#                        and a mutation-gate leg that runs only once verify is green
+#   internal-knowledge-base   a `-ge 128` UNDECIDED branch and a board-row red message,
+#                        BOTH on the FAILURE path, with the gate's status in hand
+#
+# An after-success hook hosts neither of the second repo's two legs, so the extension
+# point would have looked done while leaving that repo exactly as frozen as before.
+#
+# THE EXIT-CODE CONTRACT, STATED HERE RATHER THAN INFERRED (docs/standards/gates.md #10):
+#
+#   before-gate     rc 0 continues; ANY OTHER rc REFUSES THE PUSH with that status.
+#   after-success   rc 0 lets the push proceed; ANY OTHER rc REFUSES IT.
+#   on-failure      called with $GATE_RC as $2, on a push that is ALREADY refused.
+#                   rc 0 hands back to this template's own failure branches, so nothing
+#                   below is lost; any other rc exits with that status instead.
+#
+# ⛔ NOTHING HERE CAN TURN A RED INTO A GREEN. `on-failure` runs only where GATE_RC is
+# already non-zero and every path out of it exits non-zero, so the one thing a local leg
+# cannot do is authorise a push this gate refused.
+#
+# PRESENT BUT NOT EXECUTABLE IS A REFUSAL, NOT A SKIP — a gate that cannot run is not
+# permission to skip it. ABSENT is inert: 148 of 151 repos have no such file and must not
+# change behaviour by one byte, which is the whole blast-radius argument for this shape.
+#
+# The leg is run with STDIN CLOSED. Git hands this hook the ref list on stdin and a child
+# that inherits and closes it makes git's next write take SIGPIPE — the rc=141 scar at the
+# top of this file. PUSH_REFS is exported instead, so a local leg reads the same list.
 if [ ! -x ./verify.sh ]; then
   printf 'pre-push: ./verify.sh is missing or not executable — cannot gate this push.\n' >&2
   printf 'pre-push: refusing. An absent gate is a failure, never a skip.\n' >&2
   exit 1
+fi
+
+# ── A PARAGRAPH DOES NOT COST A SUITE ────────────────────────────────────────
+#
+# MEASURED 2026-09-23. A push whose whole diff was two documentation files — a claim written
+# into two `docs/finds/` rows — spent 1302s on fsc-blades-ct213 running the repository's
+# entire suite, and passed. The same night a session sat waiting on a gate for a HANDOVER
+# before it could close. Neither push could have changed a test outcome, because neither
+# touched a path any test reads.
+#
+# claude-code-policy has had the answer since 2026-09, in its OWN pre-commit hook, and it was
+# never lifted into this shared body — so exactly one repo had it, at commit time only, and
+# every other repo in the estate paid a full suite for a paragraph. One chokepoint beats
+# converging N repos.
+#
+# 🔴 DECLARED PER REPO, DEFAULTING TO NOTHING. "Documentation" is not a universal fact about
+# a path: this estate has gates that READ `docs/`. A repo names its own prose paths in
+# `.githooks/gate-prose-paths`, and a repo that names none behaves EXACTLY as it does today,
+# to the byte. Nothing is skipped anywhere until somebody writes that file.
+#
+# ⛔ NOT A SECOND BYPASS. It cannot be asked for — no variable turns it on. It is ALL and
+# never ANY. An empty range never qualifies. It skips the SUITE ONLY: every guard above has
+# already run and still refuses. And it says so, out loud, on the push it exempted.
+_PROSE="$(_policy_bin prose-only-push.py)"
+[ -f "$_PROSE" ] || _PROSE="$(command -v prose-only-push 2>/dev/null || printf '%s' "$_PROSE")"
+if [ -x "$_PROSE" ] && PUSH_REFS="$PUSH_REFS" "$_PROSE" --repo "$REPO_ROOT" </dev/null; then
+  printf '\n'
+  printf 'pre-push: every path this push places is declared prose this suite does not read\n'
+  printf '          (.githooks/gate-prose-paths). The full suite is NOT run — and nothing\n'
+  printf '          else was skipped: every guard above this line ran and passed.\n'
+  printf '          Mix in one non-prose path and the whole gate returns.\n'
+  printf '\n'
+  _pp_record_intent
+  exit 0
 fi
 
 # ── SEND THE SUITE TO THE RUNNER WHEN THERE IS ONE ───────────────────────────
@@ -594,7 +934,20 @@ fi
 
 printf '\npre-push: running ./verify.sh (GitHub Actions cannot run for this org)\n'
 
-"$@"
+# 🔴 `</dev/null` IS LOAD-BEARING, AND DRAINING THE REF PIPE IS NOT ENOUGH.
+#
+# `PUSH_REFS="$(cat)"` at the top reads git's ref list, but READING IT DOES NOT RELEASE IT
+# — fd 0 is still git's pipe. `claude-gate-run` spawns ssh, ssh inherits fd 0, and ssh
+# closing it on exit makes git's next write take SIGPIPE: rc=141, nothing transported, and
+# every message on screen saying the gates passed. MEASURED ON claude-code-config
+# 2026-08-19 (four "successful" pushes found by `git ls-remote`) and AGAIN 2026-08-20
+# (three more) — the second time BECAUSE THE FIX HAD LANDED ON THE DRAIN ONLY. This
+# template shipped with the drain and without the redirect, which is that same half-fix.
+#
+# A test asserting the child "read nothing" cannot catch it: the drain leaves stdin at EOF,
+# so reading nothing is true either way. The property is WHICH FILE fd 0 is, and
+# claude-code-config's own suite asserts exactly that.
+"$@" </dev/null
 GATE_RC=$?
 
 # ── THE WRAPPER COULD NOT BE EXECUTED AT ALL ─────────────────────────────────
@@ -637,7 +990,7 @@ if [ -n "$GATE_RUN" ] && { [ "$GATE_RC" -eq 126 ] || [ "$GATE_RC" -eq 127 ]; }; 
   else
     printf '\npre-push: %s could not be executed (exit %s) — running the suite locally.\n' \
       "$GATE_RUN" "$GATE_RC" >&2
-    ./verify.sh
+    ./verify.sh </dev/null
     GATE_RC=$?
   fi
 fi
@@ -672,8 +1025,19 @@ if [ "$GATE_RC" -eq 0 ]; then
     python3 "$_pr_probe" --repo "$_pr_root" --phase after_gate </dev/null || true
   ) || true
 
+  _pp_local after-success || exit $?
+
   printf '\npre-push: gates passed — pushing.\n'
   exit 0
+fi
+
+# The push is already refused here; a repo-local leg decides only which sentence the
+# person reads and, if it wants, which non-zero status they get. Returning 0 hands back to
+# the branches below, so declaring one never silently drops this template's own messages.
+_pp_local on-failure "$GATE_RC"
+_pp_local_rc=$?
+if [ "$_pp_local_rc" -ne 0 ]; then
+  exit "$_pp_local_rc"
 fi
 
 # ── THE GATE COULD NOT RUN, WHICH IS NOT THE GATE SAYING NO ──────────────────
@@ -694,16 +1058,20 @@ fi
 # emits it from its own SIGTERM handler, so this branch rests on a STATEMENT the
 # client made about itself rather than on an inference about what a number meant.
 #
-# AND IT STILL REFUSES THE PUSH. Both branches exit 1. Nothing here can turn a
-# red into a green — a gate that could not RUN is not permission to skip it. The
-# only thing that changes is which sentence the person reads.
+# AND IT STILL REFUSES THE PUSH. Nothing here can turn a red into a green — a gate
+# that could not RUN is not permission to skip it. What changes is the sentence the
+# person reads AND the status a machine reads: 125, because `merge-result.py` runs
+# this hook as the MERGE gate and reads only the status (COULD_NOT_RUN = 125). At 1,
+# pangolin-tunnel#75's tree was cached `failed` for 24h on 2026-10-05 from a run whose
+# rail was down (`refused-local`) — refused three times until `--force`. Do not
+# "simplify" this back to 1; the pre-commit template made the same move on 2026-08-31.
 if [ -n "$GATE_RUN" ] && [ "$GATE_RC" -eq 3 ]; then
   printf '\n'
   printf 'pre-push: THE GATE COULD NOT RUN — push refused. It did not fail.\n' >&2
   printf 'pre-push: the suite was ended before it reached a verdict, so NOTHING\n' >&2
   printf '    was validated and there is no finding above to act on. Push again.\n' >&2
   printf '    If it repeats, the rail is the thing to look at, not your code.\n' >&2
-  exit 1
+  exit 125
 fi
 
 printf '\n'
@@ -711,4 +1079,3 @@ printf 'pre-push: GATES FAILED — push refused.\n' >&2
 printf 'pre-push: fix the code. To override deliberately, saying why:\n' >&2
 printf '    SKIP_VERIFY=1 SKIP_VERIFY_REASON="why" git push\n' >&2
 exit 1
-# gate-template-revision: 9162b767
