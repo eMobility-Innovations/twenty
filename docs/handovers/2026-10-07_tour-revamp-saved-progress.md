@@ -1,21 +1,22 @@
-# 2026-10-07 — Tour revamp (RM #20963): saved progress merged, NOT deployed
+# 2026-10-07 — Tour revamp (RM #20963): saved progress + Sales/CS tour LIVE as tour4, click proof pending
 
 ## Status
 
-**IN-PROGRESS.** Scope agreed and split on Redmine. The first sub-task, **saved progress
-(#22314)**, is **merged** to `emobility-unity` (PR **#36**, merge commit `c7b41f73`, 2026-10-08,
-on the operator's go). It is **NOT deployed**: provisioning the custom object needs an admin API
-key this session does not hold. Production is untouched and still runs `v2.0.0-tour2`, which is
-an older trunk commit — production is not running anything unmerged.
+**IN-PROGRESS.** #22314 (saved progress, PR #36) and #22317 (Sales/CS chapters, PR #38) are
+merged to `emobility-unity` and **running on CT175 since 2026-10-08 12:24 UTC** as
+`twenty-esc-sso:v2.0.0-tour4`, built from the merge commit `bd39b307` — production runs merged
+code only. Every scripted check is green (DEPLOY.md, "Done on CT175 on 2026-10-08"). **The
+browser click proof is NOT done**: the session's Chrome extension was disconnected and the CRM
+sits behind SSO. Until someone clicks it, the two tickets are deployed, not proven.
 
 ## Scope (operator, 2026-10-07 — recorded on #20963 journal 38904)
 
 | Sub-task | What | State |
 |---|---|---|
-| #22314 | Saved progress, keyed on the workspace member | **merged (`c7b41f73`); object PROVISIONED on CT175 2026-10-08; front not swapped yet** |
+| #22314 | Saved progress, keyed on the workspace member | **LIVE as tour4 (`bd39b307`); click proof pending** |
 | #22315 | Forced replay of changed chapters + admin reset | not started — needs #22314 live |
 | #22316 | Drop-out report | not started — reads #22314's rows |
-| #22317 | Pilot-role tour — **Sales and CS** (operator), daily tasks, proven by a click | **built, PR #38 open (merge refused by classifier → operator), not deployed** |
+| #22317 | Pilot-role tour — **Sales and CS** (operator), daily tasks, proven by a click | **merged (PR #38, `bd39b307`), LIVE as tour4; click proof pending; DND copy unconfirmed** |
 | #22318 | Watchdog | **Rejected** — operator: "it's a tour, not a major thing to do a watchdog for" |
 | #22319 | Remaining roles | after the pilot is proven |
 
@@ -68,16 +69,15 @@ an older trunk commit — production is not running anything unmerged.
 
 ## Next steps
 
-0. ~~Merge PR #36~~ — done 2026-10-08, `c7b41f73`.
-1. **Deploy #22314** (DEPLOY.md, section "2026-10-07 — saved tour progress"):
-   a. admin API key → provisioner dry run → `--apply` → must print
-      `ESC_TOUR_PROGRESS: provisioned and verified`;
-   b. build the front layer on CT140, swap the image on CT175 (existing tour procedure);
-   c. prove it: start Tour in one browser, resume it in another, see the row read `completed`.
-2. #22317 — Sales and CS tour. Role is readable via upstream `useWorkspaceMemberRoles`
-   (settings/members/hooks); which Twenty roles map to Sales/CS on CT175 is NOT yet known
-   (the CT175 DB read was refused by the permission classifier).
-3. #22316, then #22315.
+0. ~~Merge #36, #38; provision; build; swap to tour4~~ — done 2026-10-08.
+1. **Click proof (needs a browser signed in to esc.crm.fiszu.com):** click Tour → pick Sales →
+   the "Your day in Sales" chapter comes before "Getting around" → chapter 4 opens a real
+   customer → stop halfway; open another browser, click Tour → it resumes at the same step
+   with Sales pre-selected → finish → the row in `/objects/escTourProgresses` reads
+   `completed` with `team = sales`. Repeat the pick with Customer service.
+   Fails ⇒ roll back (DEPLOY.md) and reopen.
+2. Operator to confirm the DND tag means "do not disturb" (inferred from the name only).
+3. #22316 drop-out report, then #22315 replay/reset, then #22319 remaining roles.
 
 ## How to resume
 
