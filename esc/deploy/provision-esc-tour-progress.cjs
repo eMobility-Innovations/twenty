@@ -49,6 +49,11 @@ const FIELDS = [
   { name: 'totalSteps', type: 'NUMBER', label: 'Steps in the run' },
   { name: 'scriptVersion', type: 'NUMBER', label: 'Tour script version' },
   { name: 'completedAt', type: 'DATE_TIME', label: 'Completed at' },
+  // RM #22317. Added after the first live provisioning (2026-10-08): the script is
+  // idempotent, so re-running --apply on an instance that has the eight fields above
+  // creates this one and nothing else. The tour's lookup ASKS for it, so it must exist
+  // before the image that reads it is swapped in, or saved progress turns itself off.
+  { name: 'team', type: 'TEXT', label: 'Team' },
 ];
 
 /**

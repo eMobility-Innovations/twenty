@@ -449,17 +449,30 @@ migration and no server rebuild, so delivery is still the front-only layer above
 
 ### One extra step, BEFORE the image swap
 
-Create the object once, with an **admin** API key (it needs data-model rights). Dry run first —
-it prints the plan and writes nothing:
+Create the object once, with a key that has data-model rights. Dry run first — it prints the
+plan and writes nothing.
+
+**Done on CT175 on 2026-10-08** with the key twenty-ingest already holds (`TWENTY_API_KEY` in
+`/root/twenty-ingest/.env` — there is no separate admin key; `TWENTY_ADMIN_API_KEY` appears only
+in an old runbook). It printed `provisioned and verified` and removed 1 sidebar entry. Re-running
+is only needed on a NEW instance.
+
+The script is NOT on CT175 — `/root/twenty-tour-src` is a CT140 checkout (an earlier revision of
+this section pointed at it on CT175, where it does not exist). Pipe it from a checkout of trunk
+on your own machine; the key is read on the box and goes in through the environment, never the
+command line:
 
 ```sh
-# on CT175, inside the server container (it has node), against its own port — not the SSO edge
-P=/root/twenty-tour-src/esc/deploy/provision-esc-tour-progress.cjs
-sudo docker exec -i -e TWENTY_URL=http://localhost:3000 -e TWENTY_API_KEY=<admin key> \
-  twenty-esc-server-1 node - < "$P"              # plan only
-sudo docker exec -i -e TWENTY_URL=http://localhost:3000 -e TWENTY_API_KEY=<admin key> \
-  twenty-esc-server-1 node - --apply < "$P"      # writes, then reads back
+# from a local checkout of emobility-unity. Inside the server container (it has node),
+# against its own port — not the SSO edge. Drop --apply for the plan-only dry run.
+git show origin/emobility-unity:esc/deploy/provision-esc-tour-progress.cjs \
+  | pangolin ssh esc-blades-ct175.ssh "sudo sh -c 'export TWENTY_API_KEY=\"\$(grep -m1 ^TWENTY_API_KEY= /root/twenty-ingest/.env | cut -d= -f2-)\";
+      docker exec -i -e TWENTY_URL=http://localhost:3000 -e TWENTY_API_KEY twenty-esc-server-1 node - --apply'"
 ```
+
+If the `.env` value is quoted, strip the quotes with `sed`, never `tr -d "\"\x27"` — inside
+double quotes that also deletes the letters `x`, `2` and `7`, and the server answers a bare
+`Internal Server Error` (a JSON parse error on the mangled token in its log). Measured 2026-10-08.
 
 It must end with `ESC_TOUR_PROGRESS: provisioned and verified`. It is idempotent — a second
 `--apply` writes nothing. It also **removes the sidebar entry Twenty adds for every new
@@ -486,3 +499,35 @@ just records nothing until the object exists.
 
 Swap the image back as above. The object can stay — nothing reads it but the tour. To remove
 it entirely: Settings → Data model → Tour progress → deactivate, then delete.
+
+## 2026-10-08 — team chapters and the customer page (RM #22317)
+
+The tour now asks "Which team are you in?" (Sales or Customer service) and adds a chapter on
+that team's day before "Getting around". The answer is remembered in the browser and on the
+person's progress row (`team`). Chapter 4 (one customer page) is now actually walked: the
+tour reads the first customer's id off the People list it is standing on. Copy and the facts
+behind it: `esc-tour/constants/escTourTeamSteps.ts`.
+
+### Before the image swap: re-run the provisioner
+
+The tour's lookup asks for the new `team` field. Run the provisioner with `--apply` exactly as
+in the section above — it is idempotent and, on an instance provisioned on 2026-10-08, creates
+`team` and nothing else (`plan: … createFields=[team]`). Swapping first is not dangerous, but
+the lookup fails on the missing field and saved progress switches itself off until it exists.
+
+### Then the front-only swap
+
+Same procedure as 2026-09-22c, from the trunk merge commit, with the base and tags of the
+day: base `twenty-esc-sso:v2.0.0-tour2` (the running image; its tarball on CT175 is the
+rollback), new tag `twenty-esc-sso:v2.0.0-tour4`. (`tour3` was started for #22314 alone and
+abandoned so the CRM restarts once for both changes; no `tour3` image exists.)
+
+`scripts/verify-esc-tour.sh` now also reads `escTourTeamSteps.ts`, so the lists the team
+chapters walk into (opportunities, callbackCampaigns, interactions, repairs) are checked
+against the live workspace too.
+
+### Proving it
+
+Click Tour, pick a team, walk to the end: the team chapter appears before "Getting around",
+and chapter 4 opens a real customer. Reload, click Tour: your team is pre-selected. The
+progress row (`/objects/escTourProgresses`) shows `team`.

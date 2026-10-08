@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ESC_TOUR_STEPS } from '@/esc-tour/constants/escTourSteps';
+import {
+  buildEscTourSteps,
+  ESC_TOUR_STEPS,
+} from '@/esc-tour/constants/escTourSteps';
 import {
   closeEscTour,
+  continueEscTourWithSteps,
   goToNextEscTourStep,
   goToPreviousEscTourStep,
   openEscTour,
@@ -11,9 +15,17 @@ import {
   takeEscTourOpenerElement,
   useEscTourState,
 } from '@/esc-tour/hooks/useEscTourStore';
+import {
+  chooseEscTourTeam,
+  type EscTourTeam,
+  useEscTourTeam,
+} from '@/esc-tour/team/escTourTeam';
 import { type EscTourStep } from '@/esc-tour/types/EscTourStep';
 import { type EscTourRect } from '@/esc-tour/utils/computeEscTourPlacement';
-import { escTourStepNeedsNavigation } from '@/esc-tour/utils/escTourRouteMatchesPath';
+import {
+  escTourStepNeedsNavigation,
+  resolveEscTourStepRoute,
+} from '@/esc-tour/utils/escTourRouteMatchesPath';
 import { resolveEscTourAnchor } from '@/esc-tour/utils/resolveEscTourAnchor';
 
 /**
@@ -68,6 +80,10 @@ export type EscTourController = {
   next: () => void;
   previous: () => void;
   startOver: () => void;
+  /** The remembered team, for the picker to show as chosen. See `escTourTeam`. */
+  team: EscTourTeam | null;
+  /** Remember the team and carry on into its chapter. */
+  chooseTeam: (team: EscTourTeam) => void;
 };
 
 /**
@@ -173,6 +189,11 @@ export const useEscTour = (
   const next = useCallback(() => goToNextEscTourStep(), []);
   const previous = useCallback(() => goToPreviousEscTourStep(), []);
   const startOver = useCallback(() => restartEscTour(), []);
+  const team = useEscTourTeam();
+  const chooseTeam = useCallback((chosen: EscTourTeam) => {
+    chooseEscTourTeam(chosen);
+    continueEscTourWithSteps(buildEscTourSteps(chosen));
+  }, []);
 
   // The rect belongs to a run, not to the hook. Clearing it here rather than inside
   // `close` catches every way a run can end — the close button, Escape, and Next on the
@@ -232,7 +253,17 @@ export const useEscTour = (
       return;
     }
 
-    if (!escTourStepNeedsNavigation(step, window.location.pathname)) {
+    const route = resolveEscTourStepRoute(step);
+
+    if (route === null) {
+      // A route read off the page, and the page had nothing to read it from — an empty
+      // People list has no first customer. Nothing to wait for: skip it now.
+      skipUnreachableEscTourStep(step.id);
+
+      return;
+    }
+
+    if (route === undefined || !escTourStepNeedsNavigation(step, window.location.pathname)) {
       return;
     }
 
@@ -248,7 +279,7 @@ export const useEscTour = (
       return;
     }
 
-    navigateToStep(step.route);
+    navigateToStep(route);
   }, [isOpen, step]);
 
   /**
@@ -407,5 +438,7 @@ export const useEscTour = (
     next,
     previous,
     startOver,
+    team,
+    chooseTeam,
   };
 };

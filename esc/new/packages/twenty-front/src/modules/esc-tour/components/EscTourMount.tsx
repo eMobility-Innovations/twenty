@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { EscTourOverlay } from '@/esc-tour/components/EscTourOverlay';
-import { ESC_TOUR_STEPS } from '@/esc-tour/constants/escTourSteps';
+import { buildEscTourSteps } from '@/esc-tour/constants/escTourSteps';
 import { useEscTour } from '@/esc-tour/hooks/useEscTour';
 import { useEscTourServerProgress } from '@/esc-tour/progress/useEscTourServerProgress';
+import { useEscTourTeam } from '@/esc-tour/team/escTourTeam';
 
 /**
  * Where the tour is RENDERED, as opposed to where it is started.
@@ -39,7 +40,11 @@ import { useEscTourServerProgress } from '@/esc-tour/progress/useEscTourServerPr
  */
 export const EscTourMount = () => {
   const navigate = useNavigate();
-  const tour = useEscTour(ESC_TOUR_STEPS, navigate);
+  // The remembered team's script (RM #22317). A team chosen mid-run is carried into that
+  // run by `chooseTeam`; this is what the NEXT open walks.
+  const team = useEscTourTeam();
+  const steps = useMemo(() => buildEscTourSteps(team), [team]);
+  const tour = useEscTour(steps, navigate);
 
   // Saved progress (RM #22314). Fails soft: no client, no member or no provisioned object
   // all mean the tour runs exactly as it did before progress existed.

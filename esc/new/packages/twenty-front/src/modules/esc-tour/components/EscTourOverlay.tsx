@@ -14,6 +14,7 @@ import {
   ESC_TOUR_STYLESHEET_ID,
 } from '@/esc-tour/constants/escTourStylesheet';
 import { type EscTourController } from '@/esc-tour/hooks/useEscTour';
+import { ESC_TOUR_TEAMS } from '@/esc-tour/team/escTourTeam';
 import { computeEscTourPlacement } from '@/esc-tour/utils/computeEscTourPlacement';
 
 /**
@@ -375,6 +376,27 @@ export const EscTourOverlay = ({ tour }: { tour: EscTourController }) => {
           >
             {tour.isWaitingForAnchor ? ESC_TOUR_WAITING_BODY : tour.step.body}
           </p>
+          {tour.step.isTeamPicker === true && !tour.isWaitingForAnchor && (
+            <div
+              className="esc-tour-teams"
+              role="group"
+              aria-label="Your team"
+              data-esc-tour="teams"
+            >
+              {ESC_TOUR_TEAMS.map(({ team, label }) => (
+                <button
+                  key={team}
+                  type="button"
+                  className="esc-tour-team"
+                  data-esc-tour={`team-${team}`}
+                  aria-pressed={tour.team === team}
+                  onClick={() => tour.chooseTeam(team)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="esc-tour-actions">
             {/* "Close" is only honest on the last step. Everywhere else this control ends a
                 tour the person has not finished, which is a skip, and the data attribute has

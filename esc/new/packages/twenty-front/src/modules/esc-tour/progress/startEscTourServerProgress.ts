@@ -12,6 +12,10 @@ import {
   loadEscTourProgress,
   updateEscTourProgress,
 } from '@/esc-tour/progress/escTourProgressClient';
+import {
+  seedEscTourTeam,
+  subscribeToEscTourTeamChoice,
+} from '@/esc-tour/team/escTourTeam';
 
 export type EscTourServerProgressOptions = {
   client: EscTourProgressGqlClient;
@@ -27,8 +31,9 @@ export type EscTourServerProgressOptions = {
  *
  * 1. Load this person's row; create it (`notStarted`) if there is none — so the report can
  *    name people who have never opened the tour, not only those who have.
- * 2. Seed the store with where an unfinished run of the same script stopped.
- * 3. Write every progress event, in order, through one promise chain — two quick clicks
+ * 2. Seed the store with where an unfinished run of the same script stopped, and the team
+ *    picker with the team chosen on another device (RM #22317).
+ * 3. Write every progress event, and every team choice, in order, through one promise chain — two quick clicks
  *    must not land out of order and leave the row pointing at the earlier step.
  *
  * FAILS SOFT, ALWAYS. The object not being provisioned yet, a permission refusal, the
@@ -74,30 +79,40 @@ export const startEscTourServerProgress = ({
       seedEscTourResumeStepId(
         escTourResumeStepIdFrom(loaded, ESC_TOUR_SCRIPT_VERSION),
       );
+      seedEscTourTeam(loaded.team);
     }
   })().catch(disable);
 
-  const unsubscribe = subscribeToEscTourProgress((event) => {
+  // Queued behind the load, so a write never races the row it writes to into existence.
+  const enqueue = (buildInput: () => Record<string, unknown>) => {
     chain = chain
       .then(async () => {
         if (isDisabled || record === null) {
           return;
         }
 
-        const input = buildEscTourProgressUpdate(
-          event,
-          furthestStepIndex,
-          now(),
-        );
-
-        furthestStepIndex = input.furthestStepIndex as number;
-        await updateEscTourProgress(client, record.id, input);
+        await updateEscTourProgress(client, record.id, buildInput());
       })
       .catch(disable);
-  });
+  };
+
+  const unsubscribeProgress = subscribeToEscTourProgress((event) =>
+    enqueue(() => {
+      const input = buildEscTourProgressUpdate(event, furthestStepIndex, now());
+
+      furthestStepIndex = input.furthestStepIndex as number;
+
+      return input;
+    }),
+  );
+
+  const unsubscribeTeam = subscribeToEscTourTeamChoice((team) =>
+    enqueue(() => ({ team })),
+  );
 
   return () => {
     isStopped = true;
-    unsubscribe();
+    unsubscribeProgress();
+    unsubscribeTeam();
   };
 };

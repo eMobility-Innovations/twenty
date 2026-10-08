@@ -302,6 +302,42 @@ export const ESC_TOUR_STYLESHEET = `
   background: #333333;
 }
 
+/* The team picker (RM #22317): one button per team, the remembered one marked. Outlined
+   rather than filled so the chosen team never reads as the popover's primary action —
+   that is still Next. */
+.esc-tour-teams {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.esc-tour-team {
+  padding: 7px 12px;
+  border: 1px solid rgba(127, 127, 127, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.esc-tour-team:hover {
+  background: rgba(127, 127, 127, 0.14);
+}
+
+.esc-tour-team:focus-visible {
+  outline: 2px solid #3b7ff5;
+  outline-offset: 1px;
+}
+
+.esc-tour-team[aria-pressed='true'] {
+  border-color: #3b7ff5;
+  box-shadow: inset 0 0 0 1px #3b7ff5;
+  font-weight: 500;
+}
+
 @media (prefers-color-scheme: dark) {
   .esc-tour-popover {
     background: #1d1d1d;

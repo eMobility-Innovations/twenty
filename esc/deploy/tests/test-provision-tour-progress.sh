@@ -78,6 +78,18 @@ assert_exit 0 "${rc}" && assert_not_contains "${calls}" "createObject" \
   && assert_contains "${calls}" "deleteNav n-ws" && assert_not_contains "${calls}" "n-mine" && pass
 stop_fake; teardown_scratch
 
+begin "the instance provisioned on 2026-10-08 gets the team field and nothing else"
+setup_scratch
+start_fake '{"objects":[{"id":"t1","nameSingular":"escTourProgress","fieldsList":[{"name":"name"},{"name":"workspaceMemberId"},{"name":"outcome"},{"name":"lastStepId"},{"name":"lastStepIndex"},{"name":"furthestStepIndex"},{"name":"totalSteps"},{"name":"scriptVersion"},{"name":"completedAt"}]}],"navItems":[]}'
+out="$(provision --apply)"; rc=$?
+calls="$(cat "${SCRATCH}/calls.log")"
+assert_exit 0 "${rc}" && assert_contains "${out}" "createFields=[team]" \
+  && assert_contains "${calls}" "createField team TEXT nullable=true" \
+  && [ "$(grep -c createField "${SCRATCH}/calls.log")" = 1 ] \
+  && assert_contains "${out}" "provisioned and verified" && pass \
+  || fail "expected exactly one createField (team): ${calls}"
+stop_fake; teardown_scratch
+
 begin "a key without data-model rights fails LOUDLY with the API's reason, non-zero"
 setup_scratch; start_fake "${EMPTY}" FAKE_REFUSE=1
 out="$(provision --apply)"; rc=$?
