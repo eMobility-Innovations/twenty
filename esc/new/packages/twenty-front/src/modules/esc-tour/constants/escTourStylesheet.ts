@@ -246,14 +246,42 @@ export const ESC_TOUR_STYLESHEET = `
   opacity: 0.85;
 }
 
-/* The line shown while a step's page is still loading. Italic and nothing else — NO
-   animation, deliberately. A spinner or a pulsing dot here would be motion that the
-   reduced-motion block would then have to switch off, and the whole point of this state is
-   that it lasts a few hundred milliseconds; something that draws the eye for that long is
-   a flicker, not feedback. */
+/* The line shown while a step's page is still loading, with a spinner beside it. The first
+   version had no spinner, reasoning that the wait lasts a few hundred milliseconds and motion
+   that short is a flicker. On the live CRM a customer page took long enough that a still
+   line read as a stuck tour (operator, 2026-10-08), so the spinner is back — but it FADES IN
+   after 300ms, so a wait that really is short still shows no flicker. */
 .esc-tour-body--waiting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-style: italic;
-  opacity: 0.7;
+  opacity: 0.85;
+}
+
+.esc-tour-spinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(127, 127, 127, 0.3);
+  border-top-color: #3b7ff5;
+  border-radius: 50%;
+  opacity: 0;
+  animation:
+    esc-tour-spinner-in 150ms ease-out 300ms forwards,
+    esc-tour-spin 800ms linear infinite;
+}
+
+@keyframes esc-tour-spinner-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes esc-tour-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .esc-tour-actions {
@@ -385,6 +413,12 @@ export const ESC_TOUR_STYLESHEET = `
 
   .esc-tour-popover {
     animation: none;
+  }
+
+  /* Still shown — it is the signal that the tour is working — just not turning. */
+  .esc-tour-spinner {
+    animation: none;
+    opacity: 1;
   }
 }
 `;

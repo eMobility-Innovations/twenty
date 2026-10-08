@@ -493,7 +493,8 @@ describe('EscTourOverlay', () => {
         const animatedSelectors = Array.from(
           ESC_TOUR_STYLESHEET.matchAll(
             new RegExp(
-              `(\\.[\\w-]+)[^{}]*\\{[^{}]*animation:\\s*${keyframeName}\\b`,
+              // Anywhere in the value, not only first: a rule may list several animations.
+              `(\\.[\\w-]+)[^{}]*\\{[^{}]*animation:[^;]*\\b${keyframeName}\\b`,
               'g',
             ),
           ),
@@ -596,6 +597,28 @@ describe('EscTourOverlay', () => {
       expect(
         screen.queryByText('Everyone we have dealt with.'),
       ).not.toBeInTheDocument();
+    });
+
+    // Operator, 2026-10-08, on the live CRM: an italic line alone read as a stuck tour while
+    // a customer page loaded. The wait needs something that visibly moves.
+    it('shows a spinner and marks the dialog busy, and drops both when the page arrives', () => {
+      const { rerender } = render(
+        <EscTourOverlay tour={waitingController()} />,
+      );
+
+      expect(
+        document.querySelector('[data-esc-tour="spinner"]'),
+      ).not.toBeNull();
+      expect(screen.getByRole('dialog')).toHaveAttribute('aria-busy', 'true');
+
+      rerender(
+        <EscTourOverlay
+          tour={{ ...waitingController(), isWaitingForAnchor: false }}
+        />,
+      );
+
+      expect(document.querySelector('[data-esc-tour="spinner"]')).toBeNull();
+      expect(screen.getByRole('dialog')).toHaveAttribute('aria-busy', 'false');
     });
 
     // The wait ends without any focus change, so a live region is the only thing that
