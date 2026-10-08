@@ -43,8 +43,12 @@ const ESC_TOUR_BODY_ID = 'esc-tour-body';
  *
  * It replaces the body rather than sitting under it, so nothing is on screen describing
  * something the reader cannot see.
+ *
+ * It sits beside a spinner. The first version had the line alone, on the theory that the
+ * wait lasts a few hundred milliseconds; on the live CRM (2026-10-08) a customer page took
+ * long enough that the operator read a still italic line as a stuck tour.
  */
-export const ESC_TOUR_WAITING_BODY = 'Opening this page…';
+export const ESC_TOUR_WAITING_BODY = 'Opening this page, one moment…';
 
 /**
  * What Tab can land on inside the popover. Deliberately narrow: the popover only ever
@@ -316,6 +320,7 @@ export const EscTourOverlay = ({ tour }: { tour: EscTourController }) => {
         data-esc-tour="popover"
         data-esc-tour-step={tour.step.id}
         data-esc-tour-side={placement.side}
+        aria-busy={tour.isWaitingForAnchor}
         style={
           {
             '--esc-tour-popover-top': `${placement.top}px`,
@@ -374,7 +379,18 @@ export const EscTourOverlay = ({ tour }: { tour: EscTourController }) => {
             data-esc-tour={tour.isWaitingForAnchor ? 'waiting' : 'body'}
             aria-live="polite"
           >
-            {tour.isWaitingForAnchor ? ESC_TOUR_WAITING_BODY : tour.step.body}
+            {tour.isWaitingForAnchor ? (
+              <>
+                <span
+                  className="esc-tour-spinner"
+                  data-esc-tour="spinner"
+                  aria-hidden="true"
+                />
+                {ESC_TOUR_WAITING_BODY}
+              </>
+            ) : (
+              tour.step.body
+            )}
           </p>
           {tour.step.isTeamPicker === true && !tour.isWaitingForAnchor && (
             <div
