@@ -13,6 +13,11 @@ import {
   UPDATE_ESC_TOUR_PROGRESS,
 } from '@/esc-tour/progress/escTourProgressClient';
 import { startEscTourServerProgress } from '@/esc-tour/progress/startEscTourServerProgress';
+import {
+  chooseEscTourTeam,
+  getEscTourTeam,
+  resetEscTourTeam,
+} from '@/esc-tour/team/escTourTeam';
 import { type EscTourStep } from '@/esc-tour/types/EscTourStep';
 
 const STEPS: EscTourStep[] = [
@@ -93,7 +98,9 @@ const start = (client: EscTourProgressGqlClient, warn = jest.fn()) => ({
 describe('startEscTourServerProgress', () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    window.localStorage.clear();
     resetEscTourStore();
+    resetEscTourTeam();
   });
 
   it('looks the person up by workspace member id', async () => {
@@ -260,6 +267,29 @@ describe('startEscTourServerProgress', () => {
     await flush();
 
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands the picker the team chosen on another device', async () => {
+    const { client } = fakeClient(row({ team: 'cs' }));
+
+    start(client);
+    await flush();
+
+    expect(getEscTourTeam()).toBe('cs');
+  });
+
+  it('writes a team choice to the row, behind the load', async () => {
+    const { client, calls } = fakeClient(null);
+
+    start(client);
+    chooseEscTourTeam('sales');
+    await flush();
+
+    expect(calls.map((call) => call.kind)).toEqual(['query', 'create', 'update']);
+    expect(calls[2].variables).toEqual({
+      idToUpdate: 'new-row',
+      input: { team: 'sales' },
+    });
   });
 
   it('stops writing once stopped', async () => {

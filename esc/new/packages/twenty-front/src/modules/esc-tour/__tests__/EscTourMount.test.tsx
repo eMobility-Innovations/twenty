@@ -16,8 +16,8 @@ import {
  * wording change upstairs cannot turn these tests red, and so the routed steps exist at all
  * — the shipped script is being rewritten by another pair of hands as this lands.
  */
-jest.mock('@/esc-tour/constants/escTourSteps', () => ({
-  ESC_TOUR_STEPS: [
+jest.mock('@/esc-tour/constants/escTourSteps', () => {
+  const steps = [
     { id: 'welcome', title: 'Welcome', body: 'W' },
     {
       id: 'people-list',
@@ -26,8 +26,11 @@ jest.mock('@/esc-tour/constants/escTourSteps', () => ({
       route: '/objects/people',
       anchor: '[data-testid="people-table"]',
     },
-  ],
-}));
+  ];
+
+  // The mount builds its script per team (RM #22317); this fixture has one script for all.
+  return { ESC_TOUR_STEPS: steps, buildEscTourSteps: () => steps };
+});
 
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),

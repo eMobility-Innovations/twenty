@@ -23,6 +23,8 @@ const buildController = (
   next: jest.fn(),
   previous: jest.fn(),
   startOver: jest.fn(),
+  team: null,
+  chooseTeam: jest.fn(),
   ...overrides,
 });
 

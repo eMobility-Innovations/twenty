@@ -19,7 +19,12 @@ import {
   ESC_TOUR_WORKSPACE_NAME_ANCHOR,
   escTourObjectAnchor,
 } from '@/esc-tour/constants/escTourAnchors';
+import {
+  ESC_TOUR_TEAM_STEPS,
+} from '@/esc-tour/constants/escTourTeamSteps';
+import { type EscTourTeam } from '@/esc-tour/team/escTourTeam';
 import { type EscTourStep } from '@/esc-tour/types/EscTourStep';
+import { escTourPersonRecordRoute } from '@/esc-tour/utils/escTourPersonRecordRoute';
 
 /**
  * Re-exported so that `escTourObjectAnchor` keeps the import path it has had since the
@@ -108,6 +113,16 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
     chapter: CHAPTER_WHERE_YOU_ARE,
     title: 'Welcome to the CRM',
     body: 'This is where every customer, order and repair lives in one place. A few minutes and you will know your way around. You can stop at any point.',
+  },
+  {
+    // RM #22317. In EVERY run, the remembered answer pre-selected, so a wrong pick is one
+    // click to change. Choosing swaps this run's script for the team's — see
+    // `continueEscTourWithSteps`. Next without choosing walks the tour every team shares.
+    id: 'team-picker',
+    chapter: CHAPTER_WHERE_YOU_ARE,
+    title: 'Which team are you in?',
+    body: 'Pick your team and the tour adds a chapter on what your day in the CRM looks like. You can change it here any time.',
+    isTeamPicker: true,
   },
   {
     id: 'sidebar',
@@ -372,25 +387,20 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
   },
 
   // ---------------------------------------------------------------------------------
-  // 4. One customer page. EVERY STEP OPTIONAL, AND NOT ONE OF THEM ROUTED. WHY:
+  // 4. One customer page. EVERY STEP OPTIONAL, EVERY STEP ROUTED BY THE PAGE ITSELF.
   //
-  //    A record page is served at AppPath.RecordShowPage —
-  //    '/object/:objectNameSingular/:objectRecordId' (twenty-shared/src/types/AppPath.ts:25)
-  //    — so reaching one means knowing a uuid. "The first person on the list" has no uuid
-  //    that can be written down here: it changes with the sort, and hard-coding a live
-  //    customer's id into shipped source would both put a real person in the repository
-  //    and break the day that record is deleted. Navigating to '/object/person' without an
-  //    id reaches the not-found page, which is worse than showing nothing.
+  //    A record page is '/object/:objectNameSingular/:objectRecordId'
+  //    (twenty-shared/src/types/AppPath.ts:25), so reaching one means knowing a uuid, and
+  //    no uuid can be written here: it would put a real customer in the repository and
+  //    break the day that record is deleted. Until RM #22317 these steps were therefore
+  //    route-less, and the chapter only ever appeared for somebody who pressed Tour while
+  //    already looking at a customer — which is almost nobody.
   //
-  //    The other option was `route: '/objects/people'`, which navigates nowhere (the tour
-  //    is already there from chapter 3) and would therefore spend 8 seconds per step
-  //    waiting for a record page that is not open — around half a minute of dead tour on
-  //    EVERY run, every time.
-  //
-  //    So these steps are route-less: they are judged at open(), against the page the
-  //    reader pressed Tour on. Press it while looking at a customer and the chapter is
-  //    there; press it anywhere else and it is dropped at open, quietly, for free. The
-  //    first step is centred, so the idea of a customer's own page survives either way.
+  //    The uuid IS on the page the tour has just walked: chapter 3 stands on the People
+  //    list, whose rows carry it. `escTourPersonRecordRoute` reads the first row when the
+  //    tour reaches this chapter and keeps the reader on that customer for the rest of it.
+  //    An empty list gives `null`, and the steps are skipped at once — quietly, because
+  //    they are optional — rather than waited on.
   // ---------------------------------------------------------------------------------
   {
     id: 'person-page',
@@ -398,6 +408,7 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
     title: 'A page of their own',
     body: 'Every line in that list opens a page belonging to one customer. It gathers them in one place: their details, their orders, their repairs, their messages.',
     optional: true,
+    route: escTourPersonRecordRoute,
   },
   {
     id: 'person-details',
@@ -406,6 +417,7 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
     body: 'This block holds what we know about the person themselves — name, phone, email, address. Each line is one fact, and anyone with permission can change it.',
     anchor: ESC_TOUR_RECORD_FIELDS_ANCHOR,
     optional: true,
+    route: escTourPersonRecordRoute,
   },
   {
     id: 'person-joined',
@@ -414,6 +426,7 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
     body: 'Underneath sit the things attached to this customer: their orders, their repairs, their conversations. Each section is the live list, not a copy of it.',
     anchor: ESC_TOUR_RECORD_RELATION_ANCHOR,
     optional: true,
+    route: escTourPersonRecordRoute,
   },
   {
     id: 'person-joined-record',
@@ -422,6 +435,7 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
     body: 'A single order or repair, in short. It is the same record the main list holds, so a change made in one place is the change everybody sees.',
     anchor: ESC_TOUR_RECORD_RELATION_ITEM_ANCHOR,
     optional: true,
+    route: escTourPersonRecordRoute,
   },
   {
     id: 'person-tabs',
@@ -430,6 +444,7 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
     body: 'The tabs along the top split a crowded page into parts you can read one at a time. The page remembers the tab you left it on.',
     anchor: ESC_TOUR_RECORD_TAB_ANCHOR,
     optional: true,
+    route: escTourPersonRecordRoute,
   },
 
   // ---------------------------------------------------------------------------------
@@ -474,7 +489,8 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
 ];
 
 /**
- * The object routes this script depends on, in script order, each named once.
+ * The object routes the scripts depend on — the shared one, then each team's — in order,
+ * each named once.
  *
  * The deploy-time check (`scripts/verify-esc-tour.sh`) compares this list against the live
  * workspace's `core."objectMetadata"`. Read the routes from here rather than by mining the
@@ -486,8 +502,27 @@ export const ESC_TOUR_STEPS: EscTourStep[] = [
  */
 export const ESC_TOUR_OBJECT_ROUTES: string[] = [
   ...new Set(
-    ESC_TOUR_STEPS.map((step) => step.objectNamePlural).filter(
-      (route): route is string => route !== undefined,
-    ),
+    [ESC_TOUR_STEPS, ...Object.values(ESC_TOUR_TEAM_STEPS)]
+      .flat()
+      .map((step) => step.objectNamePlural)
+      .filter((route): route is string => route !== undefined),
   ),
 ];
+
+const ESC_TOUR_CLOSING_CHAPTER_START = ESC_TOUR_STEPS.findIndex(
+  (step) => step.chapter === CHAPTER_GETTING_AROUND,
+);
+
+/**
+ * The script for one reader: the shared tour, with their team's chapter (RM #22317) just
+ * before "Getting around", so the run still ends where it always has. No team — nobody
+ * has picked one yet, or they walked past the picker — is the shared tour on its own.
+ */
+export const buildEscTourSteps = (team: EscTourTeam | null): EscTourStep[] =>
+  team === null
+    ? ESC_TOUR_STEPS
+    : [
+        ...ESC_TOUR_STEPS.slice(0, ESC_TOUR_CLOSING_CHAPTER_START),
+        ...ESC_TOUR_TEAM_STEPS[team],
+        ...ESC_TOUR_STEPS.slice(ESC_TOUR_CLOSING_CHAPTER_START),
+      ];

@@ -18,6 +18,7 @@ import {
   escTourObjectAnchor,
 } from '@/esc-tour/constants/escTourSteps';
 import { type EscTourStep } from '@/esc-tour/types/EscTourStep';
+import { escTourPersonRecordRoute } from '@/esc-tour/utils/escTourPersonRecordRoute';
 import { resolveEscTourAnchor } from '@/esc-tour/utils/resolveEscTourAnchor';
 
 /**
@@ -294,9 +295,11 @@ describe('ESC_TOUR_STEPS', () => {
   // that navigates somewhere without declaring the object it navigates to is a route the
   // alarm has never heard of: upstream could retire it and nothing would say so until a
   // reader watched the tour stall for eight seconds and then skip.
-  it('declares the object of every step that navigates', () => {
+  it('declares the object of every step that navigates to a list', () => {
+    // Fixed routes only. A customer page's route is read off the page (RM #22317) and is
+    // pinned by the chapter 4 tests below.
     const routedSteps = ESC_TOUR_STEPS.filter(
-      (step) => step.route !== undefined,
+      (step) => typeof step.route === 'string',
     );
 
     expect(routedSteps.length).toBeGreaterThan(0);
@@ -328,9 +331,11 @@ describe('ESC_TOUR_STEPS', () => {
   it('walks into People and nowhere else', () => {
     // MEASURED 2026-09-23: tasks 0 records, notes 0. Walking a new starter into an empty
     // list teaches them the product is empty. People has 25,418.
+    // Of the LISTS. Chapter 4 then opens one customer read off this very list — see
+    // 'routes every step by reading the page' below.
     const routes = new Set(
       ESC_TOUR_STEPS.map((step) => step.route).filter(
-        (route): route is string => route !== undefined,
+        (route): route is string => typeof route === 'string',
       ),
     );
 
@@ -405,13 +410,15 @@ describe('ESC_TOUR_STEPS chapters', () => {
     }
   });
 
-  it('navigates only inside the chapter that is about another page', () => {
+  it('navigates only inside the two chapters that are about another page', () => {
     for (const step of ESC_TOUR_STEPS) {
       if (step.route === undefined) {
         continue;
       }
 
-      expect(step.chapter).toBe(CHAPTER_A_LIST);
+      expect(step.chapter).toBe(
+        typeof step.route === 'string' ? CHAPTER_A_LIST : CHAPTER_ONE_CUSTOMER,
+      );
     }
   });
 });
@@ -424,25 +431,22 @@ describe('ESC_TOUR_STEPS chapter 4, the customer page', () => {
   });
 
   it('marks every step optional', () => {
-    // The chapter is judged against the page the reader pressed Tour on. Standing anywhere
-    // but a customer's page, none of it resolves — and that is a fact about where they are
-    // standing, not upstream drift, so naming it in `missingStepIds` would train whoever
-    // reads that report to skim it.
+    // An empty People list has no first customer to open, so none of the chapter resolves
+    // — a fact about the data, not upstream drift, so naming it in `missingStepIds` would
+    // train whoever reads that report to skim it.
     for (const step of customerPageSteps) {
       expect(step.optional).toBe(true);
     }
   });
 
-  it('never routes a step in it', () => {
-    // A record page is served at '/object/:objectNameSingular/:objectRecordId', so
-    // reaching one means knowing a uuid this file cannot contain. The alternative —
-    // routing these steps at '/objects/people', where the tour already is — navigates
-    // nowhere and spends ESC_TOUR_ANCHOR_DEADLINE_MS (8 seconds) per step waiting for a
-    // record page that is not open: around half a minute of dead tour on EVERY run.
-    // `optional: true` silences the report; it does not shorten the wait. Route-less
-    // costs nothing when the chapter does not apply, which is most of the time.
+  it('routes every step by reading the page, never by a written uuid', () => {
+    // A record page is '/object/:objectNameSingular/:objectRecordId', so reaching one
+    // means knowing a uuid this file cannot contain. Until RM #22317 that kept the chapter
+    // route-less, and it only appeared for somebody already on a customer. The uuid is on
+    // the People list chapter 3 stands on, so every step reads it from there — one
+    // resolver, so the whole chapter stays on the same customer.
     for (const step of customerPageSteps) {
-      expect(step.route).toBeUndefined();
+      expect(step.route).toBe(escTourPersonRecordRoute);
     }
   });
 

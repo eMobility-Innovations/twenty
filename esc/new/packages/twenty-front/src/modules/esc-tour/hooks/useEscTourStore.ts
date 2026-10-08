@@ -336,6 +336,31 @@ export const goToPreviousEscTourStep = () => {
   });
 };
 
+/**
+ * Swap the run's script for another and step past the current step — what choosing a team
+ * does (RM #22317): the picker is in every script, so it is found by id in the new one and
+ * the reader moves on to whatever follows it THERE, which is now their team's chapter.
+ *
+ * Re-selected exactly as `openEscTour` does, and for the same reason: the new steps are
+ * judged against the page as it is now. A current step the new script does not hold
+ * starts the new script from the top rather than guessing.
+ */
+export const continueEscTourWithSteps = (steps: EscTourStep[]) => {
+  if (!escTourState.isOpen) {
+    return;
+  }
+
+  const currentStepId = escTourState.showableSteps[escTourState.stepIndex]?.id;
+  const { showableSteps, missingStepIds } = selectShowableEscTourSteps(steps);
+  const currentIndex = showableSteps.findIndex(
+    (step) => step.id === currentStepId,
+  );
+  const nextIndex = Math.min(currentIndex + 1, showableSteps.length - 1);
+
+  escTourState = { ...escTourState, showableSteps, missingStepIds };
+  moveToEscTourStep(Math.max(0, nextIndex), { direction: 'forward' });
+};
+
 export const restartEscTour = () => {
   if (!escTourState.isOpen) {
     return;

@@ -87,8 +87,18 @@ export type EscTourStep = {
    *
    * A step with a route is NOT resolved when the tour opens. It cannot be: its anchor is
    * on a page nobody has visited yet. See `selectShowableEscTourSteps`.
+   *
+   * A FUNCTION when the path is only known on the page — a customer's own page is
+   * `/object/person/<uuid>`, and the uuid is read off the list the tour is standing on
+   * (`escTourPersonRecordRoute`). It is called when the tour reaches the step; `null` means
+   * there is nowhere to go, and the step is skipped the way an unreachable one is.
    */
-  route?: string;
+  route?: string | (() => string | null);
+  /**
+   * The step asks which team the reader is in, and the popover shows one button per team
+   * instead of describing something on the page. See `escTourTeam`.
+   */
+  isTeamPicker?: boolean;
   /**
    * What happens when this step's anchor never appears.
    *

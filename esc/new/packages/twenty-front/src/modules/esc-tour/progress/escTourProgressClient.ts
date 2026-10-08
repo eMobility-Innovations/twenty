@@ -41,6 +41,8 @@ export type EscTourProgressRecord = {
   outcome: EscTourProgressOutcome;
   scriptVersion: number | null;
   furthestStepIndex: number | null;
+  /** The team the person picked (RM #22317). Unvalidated — see `seedEscTourTeam`. */
+  team?: string | null;
 };
 
 /** The two calls this module makes. An `ApolloClient` satisfies it; so does a test fake. */
@@ -56,7 +58,8 @@ export type EscTourProgressGqlClient = {
   }) => Promise<{ data?: unknown }>;
 };
 
-const RECORD_FIELDS = 'id lastStepId outcome scriptVersion furthestStepIndex';
+const RECORD_FIELDS =
+  'id lastStepId outcome scriptVersion furthestStepIndex team';
 
 export const FIND_ESC_TOUR_PROGRESS = gql`
   query FindEscTourProgress($filter: EscTourProgressFilterInput) {

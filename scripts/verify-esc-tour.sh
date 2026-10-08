@@ -205,7 +205,16 @@ anchor_routes() {
     #
     # The helper's own signature reads `(objectNamePlural: string)`, with no quote after
     # the colon, so requiring the quote keeps the declaration out of the result.
-    grep -oE "objectNamePlural: '[^']+'" "${ESC_TOUR_STEPS_FILE}" \
+    #
+    # The team chapters (RM #22317) live beside it in escTourTeamSteps.ts and walk into
+    # their own lists, so that file is read too — a route only it names would otherwise be
+    # one this alarm never checks. It is optional only so an older checkout still measures.
+    local team_file="${ESC_TOUR_STEPS_FILE%/*}/escTourTeamSteps.ts"
+    local files=("${ESC_TOUR_STEPS_FILE}")
+
+    [ -f "${team_file}" ] && files+=("${team_file}")
+
+    grep -hoE "objectNamePlural: '[^']+'" "${files[@]}" \
         | sed -E "s/^objectNamePlural: '//; s/'\$//" \
         | sort -u
 }

@@ -12,12 +12,26 @@ an older trunk commit — production is not running anything unmerged.
 
 | Sub-task | What | State |
 |---|---|---|
-| #22314 | Saved progress, keyed on the workspace member | **merged (`c7b41f73`), not deployed** |
+| #22314 | Saved progress, keyed on the workspace member | **merged (`c7b41f73`); object PROVISIONED on CT175 2026-10-08; front not swapped yet** |
 | #22315 | Forced replay of changed chapters + admin reset | not started — needs #22314 live |
 | #22316 | Drop-out report | not started — reads #22314's rows |
-| #22317 | Pilot-role tour — **Sales and CS** (operator), daily tasks, proven by a click | not started |
+| #22317 | Pilot-role tour — **Sales and CS** (operator), daily tasks, proven by a click | **built, PR #38 open (merge refused by classifier → operator), not deployed** |
 | #22318 | Watchdog | **Rejected** — operator: "it's a tour, not a major thing to do a watchdog for" |
 | #22319 | Remaining roles | after the pilot is proven |
+
+## 2026-10-08 update
+
+- `escTourProgress` + 8 fields provisioned on CT175 with twenty-ingest's key
+  (`/root/twenty-ingest/.env` `TWENTY_API_KEY` — there is no separate admin key; operator
+  approved its use). Printed `provisioned and verified`, removed 1 sidebar entry.
+- #22317 built on PR #38: team picker (asked in the tour, operator's choice over reading the
+  Twenty role), Sales + CS chapters (facts read off the live data model), chapter 4 walked
+  via the first People row's uuid. Adds a `team` field to the provisioner.
+- A front build of `d7eb2cdc` (tour3, #22314 only) was started on CT140 and STOPPED, so the CRM
+  restarts once for both. No tour3 image exists.
+- **Deploy order once #38 is merged:** provisioner `--apply` from trunk (adds `team` only) →
+  CT140 front build of the merge commit → layer as `v2.0.0-tour4` on `tour2` on CT175 → save
+  tarball → compose lines 4 + 42 → `up -d` (never `down`) → verify scripts → browser click.
 
 ## Decisions — do not reopen
 
@@ -32,6 +46,8 @@ an older trunk commit — production is not running anything unmerged.
 3. **The store emits events; it does not call the network.** The store keeps its synchronous
    invariants; the writer (`startEscTourServerProgress`) subscribes.
 4. **No watchdog** (#22318 rejected).
+5. **The team is ASKED, not read from the Twenty role** (operator, 2026-10-08): works whatever
+   roles exist; nobody measured whether Sales/CS roles exist on CT175.
 
 ## What was done
 

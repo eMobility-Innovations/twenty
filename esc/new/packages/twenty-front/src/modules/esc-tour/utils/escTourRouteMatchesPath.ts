@@ -68,5 +68,21 @@ export const escTourRouteMatchesPath = (
 export const escTourStepNeedsNavigation = (
   step: EscTourStep,
   pathname: string,
-): boolean =>
-  step.route !== undefined && !escTourRouteMatchesPath(step.route, pathname);
+): boolean => {
+  const route = resolveEscTourStepRoute(step);
+
+  return (
+    route !== undefined &&
+    route !== null &&
+    !escTourRouteMatchesPath(route, pathname)
+  );
+};
+
+/**
+ * The path a step needs, now. `undefined` — the step has no route. `null` — it has one,
+ * but the page holds nothing to build it from (see `EscTourStep.route`).
+ */
+export const resolveEscTourStepRoute = (
+  step: EscTourStep,
+): string | null | undefined =>
+  typeof step.route === 'function' ? step.route() : step.route;
