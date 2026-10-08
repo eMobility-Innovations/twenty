@@ -531,3 +531,20 @@ against the live workspace too.
 Click Tour, pick a team, walk to the end: the team chapter appears before "Getting around",
 and chapter 4 opens a real customer. Reload, click Tour: your team is pre-selected. The
 progress row (`/objects/escTourProgresses`) shows `team`.
+
+### Done on CT175 on 2026-10-08
+
+- Provisioner re-run first: `createFields=[team]`, read back.
+- Front built on CT140 from `bd39b307` (the PR #38 merge), `EXIT=0`, team copy in the bundle;
+  tarball sha256 `492c0260…5e2e98`, identical on CT140, this machine and CT175.
+- CT175 has no git checkout of the fork (`/root/twenty-tour-src` there is NOT a repository).
+  The layer step needs `esc/` and `scripts/` from the same commit, so they were shipped as
+  `git archive bd39b307 esc scripts` into `/root/twenty-tour4-src` (`COMMIT` file records it).
+- `--layer-only` on `tour2` → `tour4`: 4/4 image checks; rollback tarball
+  `/root/twenty-esc-sso_v2.0.0-tour4.tar.gz` read back (45 entries, 340M).
+- Compose backup `/root/twenty-esc/docker-compose.yml.bak-pre-tour4-20261008`; lines 4 and 42
+  → `tour4`; `docker compose up -d`. Server `healthy`, worker `running`, 0 restarts each.
+- `verify-esc-tour.sh --container` 4/4, `verify-esc-image.sh` 2/2 (enterprise valid on all four
+  methods, SSRF allowlist active), `verify-esc-tour.sh --anchors-only` 8/8, public `/healthz` 200.
+- NOT yet done: the browser click under "Proving it". Rollback if it fails: lines 4 and 42 back
+  to `tour2` (or restore the compose backup), `docker compose up -d`.
