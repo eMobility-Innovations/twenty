@@ -548,3 +548,14 @@ progress row (`/objects/escTourProgresses`) shows `team`.
   methods, SSRF allowlist active), `verify-esc-tour.sh --anchors-only` 8/8, public `/healthz` 200.
 - NOT yet done: the browser click under "Proving it". Rollback if it fails: lines 4 and 42 back
   to `tour2` (or restore the compose backup), `docker compose up -d`.
+
+### 2026-10-08 — tour5: a spinner while a step's page loads (PR #40)
+
+The operator, clicking the live tour, read the customer-page step's still "Opening this page…" as
+a stuck tour. PR #40 (`cf78904a`) adds a spinner and `aria-busy`. Front-only, same route as
+tour4: CT140 build of `cf78904a` (bundle sha256 `ecef3481…cb8bb337f`, identical on all three
+hosts), `git archive cf78904a esc scripts` into `/root/twenty-tour5-src`, `--layer-only` on
+`tour4` → `tour5`, compose backup `docker-compose.yml.bak-pre-tour5-20261008`, lines 4 + 42,
+`up -d`. Server healthy, worker running, 0 restarts; image 4/4, server 2/2, anchors 8/8,
+`/healthz` 200. Rollback: lines 4 + 42 back to `tour4` (image and
+`/root/twenty-esc-sso_v2.0.0-tour4.tar.gz` both on CT175), `up -d`.
