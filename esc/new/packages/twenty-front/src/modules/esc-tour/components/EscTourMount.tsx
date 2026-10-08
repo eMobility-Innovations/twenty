@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { EscTourOverlay } from '@/esc-tour/components/EscTourOverlay';
 import { ESC_TOUR_STEPS } from '@/esc-tour/constants/escTourSteps';
 import { useEscTour } from '@/esc-tour/hooks/useEscTour';
+import { useEscTourServerProgress } from '@/esc-tour/progress/useEscTourServerProgress';
 
 /**
  * Where the tour is RENDERED, as opposed to where it is started.
@@ -39,6 +40,10 @@ import { useEscTour } from '@/esc-tour/hooks/useEscTour';
 export const EscTourMount = () => {
   const navigate = useNavigate();
   const tour = useEscTour(ESC_TOUR_STEPS, navigate);
+
+  // Saved progress (RM #22314). Fails soft: no client, no member or no provisioned object
+  // all mean the tour runs exactly as it did before progress existed.
+  useEscTourServerProgress();
 
   /**
    * A step that silently disappears is the failure mode of every anchored tour: upstream

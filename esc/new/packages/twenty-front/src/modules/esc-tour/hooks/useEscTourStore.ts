@@ -83,6 +83,87 @@ let escTourState: EscTourState = CLOSED_ESC_TOUR_STATE;
 const escTourListeners = new Set<() => void>();
 
 /**
+ * What the tour TELLS whoever is recording progress — the server writer
+ * (`useEscTourServerProgress`, RM #22314) and nothing else today.
+ *
+ * WHY EVENTS, AND NOT THE WRITER CALLED FROM IN HERE
+ *
+ * The store is synchronous and owns the invariants every earlier defect was about —
+ * direction, dropped steps, closing to a state that carries its report. A network write
+ * is asynchronous and can fail. Keeping the two apart means a slow or failing server
+ * changes nothing about how the tour walks, and the store's tests keep proving the same
+ * thing they proved before progress existed.
+ *
+ * `completed` and `dismissed` are different on purpose: the drop-out report (#22316) is
+ * exactly the difference between them.
+ */
+export type EscTourProgressEventKind =
+  'opened' | 'advanced' | 'completed' | 'dismissed';
+
+export type EscTourProgressEvent = {
+  kind: EscTourProgressEventKind;
+  stepId: string;
+  stepIndex: number;
+  totalSteps: number;
+  scriptVersion: number;
+};
+
+const escTourProgressListeners = new Set<
+  (event: EscTourProgressEvent) => void
+>();
+
+export const subscribeToEscTourProgress = (
+  listener: (event: EscTourProgressEvent) => void,
+): (() => void) => {
+  escTourProgressListeners.add(listener);
+
+  return () => {
+    escTourProgressListeners.delete(listener);
+  };
+};
+
+const emitEscTourProgress = (
+  kind: EscTourProgressEventKind,
+  showableSteps: EscTourStep[],
+  stepIndex: number,
+) => {
+  const stepId = showableSteps[stepIndex]?.id;
+
+  if (stepId === undefined) {
+    return;
+  }
+
+  const event: EscTourProgressEvent = {
+    kind,
+    stepId,
+    stepIndex,
+    totalSteps: showableSteps.length,
+    scriptVersion: ESC_TOUR_SCRIPT_VERSION,
+  };
+
+  for (const listener of escTourProgressListeners) {
+    try {
+      listener(event);
+    } catch {
+      // A recorder that throws must never take the tour down with it.
+    }
+  }
+};
+
+/**
+ * Where the SERVER says this person stopped, for when this tab has no position of its
+ * own — the case saved progress exists for: started on the counter PC, carried on at home.
+ *
+ * The tab's own sessionStorage position still wins. It is newer by construction: it was
+ * written by this very tab after the server copy was read.
+ */
+let escTourSeededResumeStepId: string | null = null;
+
+export const seedEscTourResumeStepId = (stepId: string | null) => {
+  escTourSeededResumeStepId = stepId;
+};
+
+/**
  * The element that had focus when the tour was opened, kept OUT of the snapshot on
  * purpose: it is not rendered from, and putting a DOM node in the snapshot would make
  * every capture a re-render of every subscriber.
@@ -98,12 +179,13 @@ const setEscTourState = (nextState: EscTourState) => {
 };
 
 /**
- * sessionStorage, not localStorage and not the server.
+ * sessionStorage: this TAB's position, for somebody who refreshes halfway through.
  *
- * The operator's decision on 2026-09-22 is that NOTHING durable records who took the
- * tour — no table, no per-user flag. A position that dies with the browser tab is the
- * most that can be kept, and it is exactly enough for the case this exists for:
- * somebody refreshes the page halfway through and does not want to start again.
+ * The person's position across devices lives on the server since RM #22314 (a Twenty
+ * custom object, not a table — see `escTourProgressClient`), written from the progress
+ * events and handed back through `seedEscTourResumeStepId`. This tab-local copy stays
+ * because it works with no server at all, and because it is the newer of the two whenever
+ * both exist.
  *
  * Every access is wrapped. Storage throws outright in some privacy modes, and a tour
  * that cannot start because a preference could not be read is worse than a tour that
@@ -169,7 +251,7 @@ export const openEscTour = (steps: EscTourStep[]) => {
   // every open, so a route that appeared or disappeared in between shifts every index —
   // an index would silently resume onto a different step, an id either finds its step
   // or does not.
-  const resumeStepId = readEscTourResumeStepId();
+  const resumeStepId = readEscTourResumeStepId() ?? escTourSeededResumeStepId;
   const resumeIndex =
     resumeStepId === null
       ? -1
@@ -195,6 +277,7 @@ export const openEscTour = (steps: EscTourStep[]) => {
   });
 
   writeEscTourResumeStepId(showableSteps[stepIndex]?.id);
+  emitEscTourProgress('opened', showableSteps, stepIndex);
 };
 
 /**
@@ -203,10 +286,30 @@ export const openEscTour = (steps: EscTourStep[]) => {
  * Both CLEAR the stored position: "Tour" must always start a fresh run afterwards. The
  * only thing that leaves a position behind is the tour being taken away without anybody
  * deciding to end it — a page refresh — which is the whole case resume exists for.
+ *
+ * The server seed is cleared too, for the same reason: the recorder writes the closed
+ * outcome, and until a fresh read says otherwise this tab must not resume into a run the
+ * person has just ended.
  */
-export const closeEscTour = () => {
+const closeEscTourAs = (kind: 'completed' | 'dismissed') => {
+  if (!escTourState.isOpen) {
+    return;
+  }
+
+  const { showableSteps, stepIndex } = escTourState;
+
   clearEscTourResumeStepId();
+  escTourSeededResumeStepId = null;
   setEscTourState(CLOSED_ESC_TOUR_STATE);
+  emitEscTourProgress(kind, showableSteps, stepIndex);
+};
+
+export const closeEscTour = () => closeEscTourAs('dismissed');
+
+const moveToEscTourStep = (stepIndex: number, patch: Partial<EscTourState>) => {
+  setEscTourState({ ...escTourState, ...patch, stepIndex });
+  writeEscTourResumeStepId(escTourState.showableSteps[stepIndex]?.id);
+  emitEscTourProgress('advanced', escTourState.showableSteps, stepIndex);
 };
 
 export const goToNextEscTourStep = () => {
@@ -215,15 +318,12 @@ export const goToNextEscTourStep = () => {
   }
 
   if (escTourState.stepIndex >= escTourState.showableSteps.length - 1) {
-    closeEscTour();
+    closeEscTourAs('completed');
 
     return;
   }
 
-  const stepIndex = escTourState.stepIndex + 1;
-
-  setEscTourState({ ...escTourState, stepIndex, direction: 'forward' });
-  writeEscTourResumeStepId(escTourState.showableSteps[stepIndex]?.id);
+  moveToEscTourStep(escTourState.stepIndex + 1, { direction: 'forward' });
 };
 
 export const goToPreviousEscTourStep = () => {
@@ -231,10 +331,9 @@ export const goToPreviousEscTourStep = () => {
     return;
   }
 
-  const stepIndex = Math.max(0, escTourState.stepIndex - 1);
-
-  setEscTourState({ ...escTourState, stepIndex, direction: 'backward' });
-  writeEscTourResumeStepId(escTourState.showableSteps[stepIndex]?.id);
+  moveToEscTourStep(Math.max(0, escTourState.stepIndex - 1), {
+    direction: 'backward',
+  });
 };
 
 export const restartEscTour = () => {
@@ -242,13 +341,7 @@ export const restartEscTour = () => {
     return;
   }
 
-  setEscTourState({
-    ...escTourState,
-    stepIndex: 0,
-    isResumed: false,
-    direction: 'forward',
-  });
-  writeEscTourResumeStepId(escTourState.showableSteps[0]?.id);
+  moveToEscTourStep(0, { isResumed: false, direction: 'forward' });
 };
 
 /**
@@ -314,8 +407,14 @@ export const skipUnreachableEscTourStep = (stepId: string) => {
   // That is the 2026-09-22 failure with a different mechanism, and this is the line that
   // stops it. `EscTourMount` therefore reports whether or not the tour is still open.
   if (showableSteps.length === 0 || stepIndex > showableSteps.length - 1) {
+    // Reported as the step the reader was stuck on, from the run as it stood BEFORE the
+    // drop — the shortened run may have no step at that index, or none at all.
+    const strandedSteps = escTourState.showableSteps;
+
     clearEscTourResumeStepId();
+    escTourSeededResumeStepId = null;
     setEscTourState({ ...CLOSED_ESC_TOUR_STATE, missingStepIds });
+    emitEscTourProgress('dismissed', strandedSteps, skippedIndex);
 
     return;
   }
@@ -327,6 +426,7 @@ export const skipUnreachableEscTourStep = (stepId: string) => {
     stepIndex,
   });
   writeEscTourResumeStepId(showableSteps[stepIndex]?.id);
+  emitEscTourProgress('advanced', showableSteps, stepIndex);
 };
 
 /**
@@ -350,5 +450,7 @@ export const takeEscTourOpenerElement = (): HTMLElement | null => {
  */
 export const resetEscTourStore = () => {
   escTourOpenerElement = null;
+  escTourSeededResumeStepId = null;
+  escTourProgressListeners.clear();
   setEscTourState(CLOSED_ESC_TOUR_STATE);
 };
