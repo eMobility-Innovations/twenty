@@ -631,3 +631,22 @@ pangolin ssh esc-blades-ct175.ssh "sudo sh -c 'export TWENTY_API_KEY=\"\$(grep -
 ### Rollback
 
 Swap the image back to `tour5`. The five fields can stay — `tour5` does not ask for them.
+
+### Done on CT175 on 2026-10-09
+
+- Provisioner first, from trunk `7bfdf003`: dry run planned exactly the five new fields; `--apply`
+  created them and printed `provisioned and verified`.
+- Front built on CT140 from `7bfdf003` (the PR #43 merge), `RC=0`, tour markers and the replay
+  note text in the bundle. CT140's `/root/twenty-tour-src` fetch refspec names a deleted branch —
+  fetch with `git fetch origin emobility-unity`.
+- Carried to CT175 (sha256 `1538c4cc…` both ends) into `/root/twenty-front-build-tour6/build`;
+  deploy scripts from `7bfdf003` in `/root/twenty-tour6-src`. Layer `twenty-esc-sso:v2.0.0-tour6`
+  on `tour5`, saved as `/root/twenty-esc-sso_v2.0.0-tour6.tar.gz` (gzip-verified); the rollback
+  `/root/twenty-esc-sso_v2.0.0-tour5.tar.gz` is beside it.
+- Compose lines 4 + 42 → `tour6` (backup `docker-compose.yml.bak.2026-10-09-*`), `up -d`; both
+  containers inspect as `tour6`.
+- `verify-esc-tour.sh --container … --anchors` 12 passed; `verify-esc-image.sh` 2 passed;
+  `/healthz` 200.
+- Report run on live data: 1 row (finished). `request-esc-tour-replay.cjs --member <Amir> --apply`
+  set the flag on Amir's own row and read it back — the browser half (tour opens itself, flag
+  clears) waits for his next CRM load; the Chrome extension was not connected from the session.
