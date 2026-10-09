@@ -2,8 +2,7 @@
 
 ## Status
 
-**IN-PROGRESS — built and tested on `feat/tour-replay-telemetry`; deploy state is recorded
-below in "Deploy".** #22315 (forced replay + admin reset) and #22316 (drop-out telemetry) are
+**LIVE (tour6) — browser proof and the Redmine updates pending; see "Deploy".** #22315 (forced replay + admin reset) and #22316 (drop-out telemetry) are
 the two sub-tasks that were "not started" on 2026-10-09 morning. #22319 (tours for the
 remaining roles) is NOT started: its own ticket says "only after the pilot role is proven and
 telemetry has been read", and the pilot's browser click-through is still owed.
@@ -27,6 +26,20 @@ Three existing assertions were changed, all because the contract grew, none loos
 the exact event shape and the exact completed-update shape gained the new fields, and the
 "instance provisioned on 2026-10-08" provisioner case now expects team + the five new fields
 (a new case pins today's nine-field instance getting exactly the five).
+
+## Deploy
+
+**LIVE on CT175 since 2026-10-09 ~10:43 UTC as `twenty-esc-sso:v2.0.0-tour6`**, built from trunk
+merge commit `7bfdf003` (PR #43, merged by the operator). Fields provisioned first; all checks
+green — record in DEPLOY.md "Done on CT175 on 2026-10-09". **Browser proof pending:** a replay
+was requested on Amir's own row; his next CRM load should open the tour at step 1 with the
+"updated" note and clear `replayRequested` (check with the replay script's dry run — it then
+plans "1 person" again).
+
+Redmine (CT141) and every `001esc-*` Pangolin alias were unreachable from ~09:30 UTC
+("no route to host" to `192.168.103.x:22123`; `redmine.fiszu.com/oic/login` 502), so the
+#22315/#22316 notes and the #20963 resolve were not written. Reported, not investigated —
+001esc is shared infra.
 
 ## Decisions & rationale — do not reopen
 
