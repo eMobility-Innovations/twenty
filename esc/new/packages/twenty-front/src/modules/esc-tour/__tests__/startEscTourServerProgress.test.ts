@@ -285,7 +285,11 @@ describe('startEscTourServerProgress', () => {
     chooseEscTourTeam('sales');
     await flush();
 
-    expect(calls.map((call) => call.kind)).toEqual(['query', 'create', 'update']);
+    expect(calls.map((call) => call.kind)).toEqual([
+      'query',
+      'create',
+      'update',
+    ]);
     expect(calls[2].variables).toEqual({
       idToUpdate: 'new-row',
       input: { team: 'sales' },
@@ -302,5 +306,106 @@ describe('startEscTourServerProgress', () => {
     await flush();
 
     expect(calls.filter((call) => call.kind === 'update')).toEqual([]);
+  });
+
+  it('does not seed the tour or the team when stopped before the load lands', async () => {
+    const { client } = fakeClient(
+      row({ outcome: 'inProgress', lastStepId: 'two', team: 'cs' }),
+    );
+    const opened: string[] = [];
+    const { stop } = start(client);
+
+    stop();
+    await flush();
+    subscribeToEscTourProgress((event) => opened.push(event.stepId));
+    openEscTour(STEPS);
+
+    expect(opened[0]).toBe('one');
+    expect(getEscTourTeam()).toBeNull();
+  });
+
+  it('treats a row with no furthestStepIndex as zero', async () => {
+    const { client, calls } = fakeClient(row({ furthestStepIndex: null }));
+
+    start(client);
+    await flush();
+    openEscTour(STEPS);
+    await flush();
+
+    expect(
+      calls.find((call) => call.kind === 'update')?.variables.input,
+    ).toEqual(expect.objectContaining({ furthestStepIndex: 0 }));
+  });
+
+  it('turns itself off when the create returns no record', async () => {
+    const { client } = fakeClient(null);
+    const { warn } = start({
+      ...client,
+      mutate: async () => ({ data: {} }),
+    });
+
+    await flush();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain(
+      'createEscTourProgress returned no record',
+    );
+  });
+
+  it('names a failure that is not an Error in its warning', async () => {
+    const { client } = fakeClient(null);
+    const { warn } = start({
+      ...client,
+      query: async () => {
+        throw 'offline';
+      },
+    });
+
+    await flush();
+
+    expect(warn).toHaveBeenCalledWith(
+      '[esc-tour] saved progress is off for this page load: offline',
+    );
+  });
+
+  it('warns through console.warn and stamps the real time by default', async () => {
+    const consoleWarn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => {});
+    const { client, calls } = fakeClient(row({}));
+
+    startEscTourServerProgress({
+      client,
+      workspaceMemberId: 'member-1',
+      displayName: 'Sam Agent',
+    });
+    await flush();
+    openEscTour([{ id: 'only', title: 'Only', body: 'b' }]);
+    goToNextEscTourStep();
+    await flush();
+
+    const completedAt = (
+      calls.filter((call) => call.kind === 'update').pop()?.variables
+        .input as Record<string, unknown>
+    ).completedAt as string;
+
+    expect(Math.abs(Date.parse(completedAt) - Date.now())).toBeLessThan(60_000);
+
+    startEscTourServerProgress({
+      client: {
+        ...client,
+        query: async () => {
+          throw new Error('down');
+        },
+      },
+      workspaceMemberId: 'member-1',
+      displayName: 'Sam Agent',
+    });
+    await flush();
+
+    expect(consoleWarn).toHaveBeenCalledWith(
+      '[esc-tour] saved progress is off for this page load: down',
+    );
+    consoleWarn.mockRestore();
   });
 });
