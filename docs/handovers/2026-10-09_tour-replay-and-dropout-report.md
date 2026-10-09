@@ -28,6 +28,25 @@ the exact event shape and the exact completed-update shape gained the new fields
 "instance provisioned on 2026-10-08" provisioner case now expects team + the five new fields
 (a new case pins today's nine-field instance getting exactly the five).
 
+## Deploy
+
+**NOT deployed. Blocked on the merge of PR #43** — `gh pr merge` was refused by the session's
+permission check ("Merge Without Review"), as it was for #36 and #38. Gate green on the runner
+(`./verify.sh`, fsc-blades-ct213, exit 0); tour suite green locally in `esc-front-build:tour1`
+(the runner has no build image and skips it). Production still runs `v2.0.0-tour5` — only
+merged code is live. Once merged, follow DEPLOY.md "2026-10-09": provisioner `--apply` →
+CT140 front build of the merge commit → layer `v2.0.0-tour6` on `tour5` on CT175 → save
+tarball → compose lines 4 + 42 → `up -d` → three checks → click proof.
+
+CT140's `/root/twenty-tour-src` is detached at `cf78904a` with the overlay applied; every
+modified file was checked byte-identical to its `esc/overlay/` copy on 2026-10-09, so it is
+build residue: `git checkout -- packages && git clean -fd packages/twenty-front/src/modules/esc-tour`
+before checking out the merge commit.
+
+Redmine notes for #22315/#22316 could not be posted: `pangolin ssh 001esc-ct141.ssh` failed
+from the workstation at ~09:30 UTC ("auth daemon … 192.168.103.141:22123: no route to host"),
+having worked at ~08:36 UTC. The note text is in the PR body.
+
 ## Decisions & rationale — do not reopen
 
 1. **Version per chapter, not `ESC_TOUR_SCRIPT_VERSION`.** That number guards a stored
