@@ -53,6 +53,9 @@ nav="$(node -e 'console.log(JSON.stringify(require(process.argv[1])))' "${SCRATC
 assert_exit 0 "${rc}" && assert_contains "${calls}" "createObject escTourProgress" \
   && assert_contains "${calls}" "createField workspaceMemberId TEXT nullable=true" \
   && assert_contains "${calls}" "createField completedAt DATE_TIME nullable=true" \
+  && assert_contains "${calls}" "createField endReason TEXT nullable=true" \
+  && assert_contains "${calls}" "createField seenChapterVersions TEXT nullable=true" \
+  && assert_contains "${calls}" "createField replayRequested BOOLEAN nullable=true" \
   && assert_contains "${calls}" "deleteNav" && assert_not_contains "${calls}" "n-people" \
   && assert_contains "${out}" "provisioned and verified" && pass
 stop_fake; teardown_scratch
@@ -78,16 +81,34 @@ assert_exit 0 "${rc}" && assert_not_contains "${calls}" "createObject" \
   && assert_contains "${calls}" "deleteNav n-ws" && assert_not_contains "${calls}" "n-mine" && pass
 stop_fake; teardown_scratch
 
-begin "the instance provisioned on 2026-10-08 gets the team field and nothing else"
+# Amended 2026-10-09 (RM #22315/#22316): this instance was first provisioned with eight
+# fields and then got `team`; the five fields added for replay and the drop-out report are
+# now missing from it too. What this test exists to hold is unchanged — only the missing
+# fields are created, never one that exists.
+NEW_FIELDS="lastChapter,endReason,endedAt,seenChapterVersions,replayRequested"
+
+begin "the instance provisioned on 2026-10-08 gets team plus the replay and report fields, nothing else"
 setup_scratch
 start_fake '{"objects":[{"id":"t1","nameSingular":"escTourProgress","fieldsList":[{"name":"name"},{"name":"workspaceMemberId"},{"name":"outcome"},{"name":"lastStepId"},{"name":"lastStepIndex"},{"name":"furthestStepIndex"},{"name":"totalSteps"},{"name":"scriptVersion"},{"name":"completedAt"}]}],"navItems":[]}'
 out="$(provision --apply)"; rc=$?
 calls="$(cat "${SCRATCH}/calls.log")"
-assert_exit 0 "${rc}" && assert_contains "${out}" "createFields=[team]" \
+assert_exit 0 "${rc}" && assert_contains "${out}" "createFields=[team,${NEW_FIELDS}]" \
   && assert_contains "${calls}" "createField team TEXT nullable=true" \
-  && [ "$(grep -c createField "${SCRATCH}/calls.log")" = 1 ] \
+  && [ "$(grep -c createField "${SCRATCH}/calls.log")" = 6 ] \
   && assert_contains "${out}" "provisioned and verified" && pass \
-  || fail "expected exactly one createField (team): ${calls}"
+  || fail "expected exactly six createFields (team + ${NEW_FIELDS}): ${calls}"
+stop_fake; teardown_scratch
+
+begin "the instance as live since tour4 (nine fields) gets exactly the five new ones"
+setup_scratch
+start_fake '{"objects":[{"id":"t1","nameSingular":"escTourProgress","fieldsList":[{"name":"name"},{"name":"workspaceMemberId"},{"name":"outcome"},{"name":"lastStepId"},{"name":"lastStepIndex"},{"name":"furthestStepIndex"},{"name":"totalSteps"},{"name":"scriptVersion"},{"name":"completedAt"},{"name":"team"}]}],"navItems":[]}'
+out="$(provision --apply)"; rc=$?
+calls="$(cat "${SCRATCH}/calls.log")"
+assert_exit 0 "${rc}" && assert_contains "${out}" "createFields=[${NEW_FIELDS}]" \
+  && assert_not_contains "${calls}" "createField team" \
+  && [ "$(grep -c createField "${SCRATCH}/calls.log")" = 5 ] \
+  && assert_contains "${out}" "provisioned and verified" && pass \
+  || fail "expected exactly the five new createFields: ${calls}"
 stop_fake; teardown_scratch
 
 begin "a key without data-model rights fails LOUDLY with the API's reason, non-zero"

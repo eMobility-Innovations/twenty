@@ -53,6 +53,11 @@ describe('esc-tour progress events', () => {
         stepIndex: 0,
         totalSteps: 3,
         scriptVersion: ESC_TOUR_SCRIPT_VERSION,
+        // RM #22315/#22316: the chapter fields and the replay flag ride on every event.
+        chapter: null,
+        chapters: [],
+        reachedChapters: [],
+        isReplay: false,
       },
     ]);
   });

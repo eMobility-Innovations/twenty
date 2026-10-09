@@ -301,6 +301,7 @@ describe('the picker in the popover', () => {
     anchorRect: null,
     missingStepIds: [],
     isResumed: false,
+    isReplay: false,
     isWaitingForAnchor: false,
     open: jest.fn(),
     close: jest.fn(),

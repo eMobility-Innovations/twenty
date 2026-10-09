@@ -51,6 +51,14 @@ const ESC_TOUR_BODY_ID = 'esc-tour-body';
 export const ESC_TOUR_WAITING_BODY = 'Opening this page, one moment…';
 
 /**
+ * Shown on the first step of a run the tour opened BY ITSELF (RM #22315). Without it an
+ * overlay appears on a page the person did not ask for, and the honest first question —
+ * "why is this here?" — has no answer on screen.
+ */
+export const ESC_TOUR_REPLAY_NOTE =
+  'The tour has been updated since you last went through it. This is the part that changed.';
+
+/**
  * What Tab can land on inside the popover. Deliberately narrow: the popover only ever
  * holds buttons, and a selector that guesses widely is a selector that traps focus on a
  * node the browser would have skipped.
@@ -361,6 +369,11 @@ export const EscTourOverlay = ({ tour }: { tour: EscTourController }) => {
               </span>
             </div>
           </div>
+          {tour.isReplay && tour.stepIndex === 0 && (
+            <p className="esc-tour-replay-note" data-esc-tour="replay-note">
+              {ESC_TOUR_REPLAY_NOTE}
+            </p>
+          )}
           <h2 className="esc-tour-title" id={ESC_TOUR_TITLE_ID}>
             {tour.step.title}
           </h2>

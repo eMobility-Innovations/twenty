@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
 import {
+  ESC_TOUR_REPLAY_NOTE,
   ESC_TOUR_WAITING_BODY,
   EscTourOverlay,
 } from '@/esc-tour/components/EscTourOverlay';
@@ -17,6 +18,7 @@ const buildController = (
   anchorRect: { top: 100, left: 20, width: 200, height: 32 },
   missingStepIds: [],
   isResumed: false,
+  isReplay: false,
   isWaitingForAnchor: false,
   open: jest.fn(),
   close: jest.fn(),
@@ -779,5 +781,27 @@ describe('EscTourOverlay', () => {
 
       expect(tour.startOver).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('EscTourOverlay — a replay the tour opened by itself (RM #22315)', () => {
+  it('says why it is there on the first step', () => {
+    render(<EscTourOverlay tour={buildController({ isReplay: true })} />);
+
+    expect(screen.getByText(ESC_TOUR_REPLAY_NOTE)).toBeInTheDocument();
+  });
+
+  it('says it once, not on every step', () => {
+    render(
+      <EscTourOverlay tour={buildController({ isReplay: true, stepIndex: 1 })} />,
+    );
+
+    expect(screen.queryByText(ESC_TOUR_REPLAY_NOTE)).toBeNull();
+  });
+
+  it('says nothing on a run the person started', () => {
+    render(<EscTourOverlay tour={buildController()} />);
+
+    expect(screen.queryByText(ESC_TOUR_REPLAY_NOTE)).toBeNull();
   });
 });

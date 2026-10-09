@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 import { type EscTourStep } from '@/esc-tour/types/EscTourStep';
+import { escTourChaptersOf } from '@/esc-tour/utils/escTourChaptersOf';
 import { selectShowableEscTourSteps } from '@/esc-tour/utils/resolveEscTourAnchor';
 
 /**
@@ -53,6 +54,11 @@ export type EscTourState = {
   isResumed: boolean;
   /** Which way the last move went. See `EscTourDirection`. */
   direction: EscTourDirection;
+  /**
+   * True when the tour opened BY ITSELF to replay changed chapters, or because an admin
+   * asked for a replay (RM #22315) — the popover says why it is there. See `escTourReplay`.
+   */
+  isReplay: boolean;
 };
 
 /**
@@ -76,6 +82,7 @@ const CLOSED_ESC_TOUR_STATE: EscTourState = Object.freeze({
   missingStepIds: [],
   isResumed: false,
   direction: 'forward',
+  isReplay: false,
 });
 
 let escTourState: EscTourState = CLOSED_ESC_TOUR_STATE;
@@ -100,12 +107,34 @@ const escTourListeners = new Set<() => void>();
 export type EscTourProgressEventKind =
   'opened' | 'advanced' | 'completed' | 'dismissed';
 
+/**
+ * How a run ended, for the drop-out report (RM #22316). Only a closing event carries one.
+ *
+ *   - `finished` — Next on the last step.
+ *   - `closed`   — the person pressed Skip tour / Close or Escape part-way.
+ *   - `stranded` — the run closed itself because the steps left could not be found on the
+ *     page. Not the person's choice, and the report keeps it apart so a broken tour is not
+ *     read as people losing interest.
+ *
+ * A run that never closes — the tab was shut, the page reloaded and nobody pressed Tour
+ * again — leaves the row `inProgress` and is read as a drop-out by its age.
+ */
+export type EscTourEndReason = 'finished' | 'closed' | 'stranded';
+
 export type EscTourProgressEvent = {
   kind: EscTourProgressEventKind;
   stepId: string;
   stepIndex: number;
   totalSteps: number;
   scriptVersion: number;
+  /** Chapter of `stepId`, or null for a step outside every chapter. */
+  chapter: string | null;
+  /** Every chapter of the run, in order (RM #22315). */
+  chapters: string[];
+  /** The chapters from the start of the run up to and including `stepId`. */
+  reachedChapters: string[];
+  isReplay: boolean;
+  endReason?: EscTourEndReason;
 };
 
 const escTourProgressListeners = new Set<
@@ -126,19 +155,26 @@ const emitEscTourProgress = (
   kind: EscTourProgressEventKind,
   showableSteps: EscTourStep[],
   stepIndex: number,
+  isReplay: boolean,
+  endReason?: EscTourEndReason,
 ) => {
-  const stepId = showableSteps[stepIndex]?.id;
+  const step = showableSteps[stepIndex];
 
-  if (stepId === undefined) {
+  if (step === undefined) {
     return;
   }
 
   const event: EscTourProgressEvent = {
     kind,
-    stepId,
+    stepId: step.id,
     stepIndex,
     totalSteps: showableSteps.length,
     scriptVersion: ESC_TOUR_SCRIPT_VERSION,
+    chapter: step.chapter ?? null,
+    chapters: escTourChaptersOf(showableSteps),
+    reachedChapters: escTourChaptersOf(showableSteps.slice(0, stepIndex + 1)),
+    isReplay,
+    ...(endReason === undefined ? {} : { endReason }),
   };
 
   for (const listener of escTourProgressListeners) {
@@ -236,7 +272,18 @@ export const useEscTourState = (): EscTourState =>
     getEscTourSnapshot,
   );
 
-export const openEscTour = (steps: EscTourStep[]) => {
+export type EscTourOpenOptions = {
+  /**
+   * The tour opened itself to replay (RM #22315). Starts at the first step whatever
+   * position is stored: a replay is a fixed set of chapters, not a run to pick up.
+   */
+  isReplay?: boolean;
+};
+
+export const openEscTour = (
+  steps: EscTourStep[],
+  { isReplay = false }: EscTourOpenOptions = {},
+) => {
   // Resolved once, at open, and never recomputed on a render: the set of steps must not
   // change under the reader's feet because something on the page moved.
   //
@@ -251,7 +298,9 @@ export const openEscTour = (steps: EscTourStep[]) => {
   // every open, so a route that appeared or disappeared in between shifts every index —
   // an index would silently resume onto a different step, an id either finds its step
   // or does not.
-  const resumeStepId = readEscTourResumeStepId() ?? escTourSeededResumeStepId;
+  const resumeStepId = isReplay
+    ? null
+    : (readEscTourResumeStepId() ?? escTourSeededResumeStepId);
   const resumeIndex =
     resumeStepId === null
       ? -1
@@ -274,10 +323,11 @@ export const openEscTour = (steps: EscTourStep[]) => {
     missingStepIds,
     isResumed,
     direction: 'forward',
+    isReplay,
   });
 
   writeEscTourResumeStepId(showableSteps[stepIndex]?.id);
-  emitEscTourProgress('opened', showableSteps, stepIndex);
+  emitEscTourProgress('opened', showableSteps, stepIndex, isReplay);
 };
 
 /**
@@ -296,12 +346,18 @@ const closeEscTourAs = (kind: 'completed' | 'dismissed') => {
     return;
   }
 
-  const { showableSteps, stepIndex } = escTourState;
+  const { showableSteps, stepIndex, isReplay } = escTourState;
 
   clearEscTourResumeStepId();
   escTourSeededResumeStepId = null;
   setEscTourState(CLOSED_ESC_TOUR_STATE);
-  emitEscTourProgress(kind, showableSteps, stepIndex);
+  emitEscTourProgress(
+    kind,
+    showableSteps,
+    stepIndex,
+    isReplay,
+    kind === 'completed' ? 'finished' : 'closed',
+  );
 };
 
 export const closeEscTour = () => closeEscTourAs('dismissed');
@@ -309,7 +365,12 @@ export const closeEscTour = () => closeEscTourAs('dismissed');
 const moveToEscTourStep = (stepIndex: number, patch: Partial<EscTourState>) => {
   setEscTourState({ ...escTourState, ...patch, stepIndex });
   writeEscTourResumeStepId(escTourState.showableSteps[stepIndex]?.id);
-  emitEscTourProgress('advanced', escTourState.showableSteps, stepIndex);
+  emitEscTourProgress(
+    'advanced',
+    escTourState.showableSteps,
+    stepIndex,
+    escTourState.isReplay,
+  );
 };
 
 export const goToNextEscTourStep = () => {
@@ -435,11 +496,18 @@ export const skipUnreachableEscTourStep = (stepId: string) => {
     // Reported as the step the reader was stuck on, from the run as it stood BEFORE the
     // drop — the shortened run may have no step at that index, or none at all.
     const strandedSteps = escTourState.showableSteps;
+    const { isReplay } = escTourState;
 
     clearEscTourResumeStepId();
     escTourSeededResumeStepId = null;
     setEscTourState({ ...CLOSED_ESC_TOUR_STATE, missingStepIds });
-    emitEscTourProgress('dismissed', strandedSteps, skippedIndex);
+    emitEscTourProgress(
+      'dismissed',
+      strandedSteps,
+      skippedIndex,
+      isReplay,
+      'stranded',
+    );
 
     return;
   }
@@ -451,7 +519,7 @@ export const skipUnreachableEscTourStep = (stepId: string) => {
     stepIndex,
   });
   writeEscTourResumeStepId(showableSteps[stepIndex]?.id);
-  emitEscTourProgress('advanced', showableSteps, stepIndex);
+  emitEscTourProgress('advanced', showableSteps, stepIndex, escTourState.isReplay);
 };
 
 /**

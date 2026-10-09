@@ -206,6 +206,13 @@ export const ESC_TOUR_STYLESHEET = `
    \`min-width: 0\` is what lets the ellipsis happen at all: a flex item will not shrink
    below its content width without it, and a long chapter name would shove the counter off
    the edge of the popover. */
+.esc-tour-replay-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .esc-tour-chapter {
   flex: 1;
   min-width: 0;
