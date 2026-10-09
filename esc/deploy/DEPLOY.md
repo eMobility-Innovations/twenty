@@ -559,3 +559,75 @@ hosts), `git archive cf78904a esc scripts` into `/root/twenty-tour5-src`, `--lay
 `up -d`. Server healthy, worker running, 0 restarts; image 4/4, server 2/2, anchors 8/8,
 `/healthz` 200. Rollback: lines 4 + 42 back to `tour4` (image and
 `/root/twenty-esc-sso_v2.0.0-tour4.tar.gz` both on CT175), `up -d`.
+
+## 2026-10-09 — replay of changed chapters, admin reset, drop-out report (RM #22315, #22316)
+
+Three things ship together, all front-only plus five new nullable fields on `escTourProgress`:
+
+- **Drop-out telemetry (#22316).** Every run that ends writes `endReason` (`finished` |
+  `closed` | `stranded`), `endedAt`, and the chapter of its last step (`lastChapter`).
+  `stranded` is the tour shutting itself because its steps could not be found — kept apart
+  so a broken tour is never read as people losing interest.
+- **Replay of changed chapters (#22315).** Each chapter has a version in
+  `esc-tour/replay/escTourReplay.ts` (`ESC_TOUR_CHAPTER_VERSIONS`). Rewriting a chapter =
+  bumping its number in the same commit. On their next load, people who have been through
+  the tour and saw an older version get that chapter on its own, once; the first step says
+  why the tour opened. All chapters ship at version 1 and existing rows read as having seen
+  version 1, so **nobody is replayed by this deploy itself.**
+- **Admin reset (#22315).** `replayRequested` on a person's row makes the whole tour open by
+  itself from the top on their next load; the tour clears it as it opens.
+
+### Before the image swap: re-run the provisioner
+
+Exactly as in the 2026-10-07 section. On the live instance (nine fields since tour4) it must
+print `createFields=[lastChapter,endReason,endedAt,seenChapterVersions,replayRequested]` and
+`provisioned and verified`. Swapping first is not dangerous — the lookup asks for the new
+fields, fails, and saved progress switches itself off until they exist — but nothing is
+recorded in between.
+
+### Then the front-only swap
+
+Same procedure as 2026-09-22c, from the trunk merge commit: base = the running image
+(`twenty-esc-sso:v2.0.0-tour5`, whose tarball on CT175 is the rollback), new tag
+`twenty-esc-sso:v2.0.0-tour6`.
+
+### The two admin scripts
+
+Both read the key the same way as the provisioner (on the box, through the environment) and
+talk to the server container's own port. Pipe them from a trunk checkout:
+
+They `require('./lib/esc-tour-progress-rows.cjs')`, so they cannot be piped on stdin like the
+single-file provisioner. Copy the three files into the container and run them there:
+
+```sh
+for f in report-esc-tour-progress.cjs request-esc-tour-replay.cjs lib/esc-tour-progress-rows.cjs; do
+  git show "origin/emobility-unity:esc/deploy/$f" \
+    | pangolin ssh esc-blades-ct175.ssh "sudo docker exec -i twenty-esc-server-1 sh -c 'mkdir -p /tmp/esc-tour/lib && cat > /tmp/esc-tour/$f'"
+done
+pangolin ssh esc-blades-ct175.ssh "sudo sh -c 'export TWENTY_API_KEY=\"\$(grep -m1 ^TWENTY_API_KEY= /root/twenty-ingest/.env | cut -d= -f2-)\";
+    docker exec -e TWENTY_URL=http://localhost:3000 -e TWENTY_API_KEY twenty-esc-server-1 node /tmp/esc-tour/report-esc-tour-progress.cjs --names'"
+```
+
+- `report-esc-tour-progress.cjs` — never opened / finished / closed early / stranded / left
+  mid-run (inProgress, untouched > `--stale-hours`, default 24) / on it now, then where people
+  stopped, most common first. Rows from before this deploy have no `endReason`; a dismissal
+  among them is counted as closed early, which is what it was then.
+- `request-esc-tour-replay.cjs --member <workspaceMemberId> [--member …] | --everyone` —
+  dry run by default, lists who would change; `--apply` writes and reads back; `--clear`
+  undoes a request nobody has loaded yet. An id with no row is an error, not a skip. For one
+  person, ticking "Replay requested" on their row in `/objects/escTourProgresses` does the
+  same.
+
+### Proving it
+
+1. Report: run it; the counts add up to the number of rows, and your own row is in the
+   group you expect.
+2. Telemetry: open Tour, Skip part-way; your row reads `dismissed`, `endReason=closed`,
+   `lastChapter` = the chapter you were on, `endedAt` set.
+3. Reset: `request-esc-tour-replay.cjs --member <your id> --apply`, reload the CRM; within
+   ~2 s the tour opens at step 1 with "The tour has been updated…", and your row's
+   `replayRequested` is false again.
+
+### Rollback
+
+Swap the image back to `tour5`. The five fields can stay — `tour5` does not ask for them.
