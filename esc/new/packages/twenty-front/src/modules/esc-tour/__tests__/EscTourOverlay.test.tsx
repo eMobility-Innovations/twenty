@@ -242,6 +242,30 @@ describe('EscTourOverlay', () => {
       expect(document.activeElement).toBe(lastControl);
     });
 
+    it('lets Tab in the middle of the controls move on normally', () => {
+      render(<EscTourOverlay tour={buildController({ stepIndex: 1 })} />);
+
+      const controls = getPopover().querySelectorAll('button');
+
+      controls[0].focus();
+
+      expect(fireEvent.keyDown(controls[0], { key: 'Tab' })).toBe(true);
+    });
+
+    // Every control can be absent at once (a future step with no buttons, or a control
+    // disabled mid-load). Tab must still not walk out of the dialog into the locked CRM.
+    it('swallows Tab when nothing in the popover can take focus', () => {
+      render(<EscTourOverlay tour={buildController({ stepIndex: 1 })} />);
+
+      const popover = getPopover();
+
+      jest
+        .spyOn(popover, 'querySelectorAll')
+        .mockReturnValue([] as unknown as NodeListOf<HTMLElement>);
+
+      expect(fireEvent.keyDown(popover, { key: 'Tab' })).toBe(false);
+    });
+
     it('leaves every other key to the tour itself', () => {
       render(<EscTourOverlay tour={buildController({ stepIndex: 1 })} />);
 
