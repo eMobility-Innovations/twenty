@@ -70,6 +70,8 @@ export type EscTourController = {
   missingStepIds: string[];
   /** True when this run picked up where an interrupted one left off. */
   isResumed: boolean;
+  /** True when the tour opened by itself to replay changed chapters (RM #22315). */
+  isReplay: boolean;
   /**
    * True while the current step's anchor is not on the page yet — the tour has navigated
    * and the page has not finished. The popover says so; see `EscTourOverlay`.
@@ -167,8 +169,14 @@ export const useEscTour = (
   steps: EscTourStep[] = ESC_TOUR_STEPS,
   navigate?: EscTourNavigate,
 ): EscTourController => {
-  const { isOpen, stepIndex, showableSteps, missingStepIds, isResumed } =
-    useEscTourState();
+  const {
+    isOpen,
+    stepIndex,
+    showableSteps,
+    missingStepIds,
+    isResumed,
+    isReplay,
+  } = useEscTourState();
   const [anchorRect, setAnchorRect] = useState<EscTourRect | null>(null);
   const [isWaitingForAnchor, setIsWaitingForAnchor] = useState(false);
 
@@ -432,6 +440,7 @@ export const useEscTour = (
     anchorRect,
     missingStepIds,
     isResumed,
+    isReplay,
     isWaitingForAnchor,
     open,
     close,

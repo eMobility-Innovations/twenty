@@ -54,6 +54,15 @@ const FIELDS = [
   // creates this one and nothing else. The tour's lookup ASKS for it, so it must exist
   // before the image that reads it is swapped in, or saved progress turns itself off.
   { name: 'team', type: 'TEXT', label: 'Team' },
+  // RM #22316 — how each run ended, for the drop-out report (report-esc-tour-progress.cjs).
+  { name: 'lastChapter', type: 'TEXT', label: 'Last chapter' },
+  { name: 'endReason', type: 'TEXT', label: 'How the run ended' },
+  { name: 'endedAt', type: 'DATE_TIME', label: 'Run ended at' },
+  // RM #22315 — what the person has seen, and an admin's request for a full replay
+  // (request-esc-tour-replay.cjs, or tick it on the row). Like `team`, the tour ASKS for
+  // these two, so they must exist before the image that reads them is swapped in.
+  { name: 'seenChapterVersions', type: 'TEXT', label: 'Chapters seen (versions)' },
+  { name: 'replayRequested', type: 'BOOLEAN', label: 'Replay requested' },
 ];
 
 /**

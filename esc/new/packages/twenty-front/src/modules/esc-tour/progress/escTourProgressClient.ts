@@ -1,6 +1,7 @@
 import { gql } from '@apollo/client';
 
 import { type EscTourProgressEvent } from '@/esc-tour/hooks/useEscTourStore';
+import { type EscTourSeenChapters } from '@/esc-tour/replay/escTourReplay';
 
 /**
  * Per-person tour progress, stored as a Twenty CUSTOM OBJECT (RM #22314).
@@ -43,6 +44,14 @@ export type EscTourProgressRecord = {
   furthestStepIndex: number | null;
   /** The team the person picked (RM #22317). Unvalidated — see `seedEscTourTeam`. */
   team?: string | null;
+  /**
+   * JSON map of chapter → the version of it this person last saw (RM #22315). A string,
+   * because a TEXT field is the one shape the metadata API, the record table and the
+   * report all handle without a field type of our own. See `escTourReplay`.
+   */
+  seenChapterVersions?: string | null;
+  /** Set by an admin to make the whole tour open by itself on the next load (RM #22315). */
+  replayRequested?: boolean | null;
 };
 
 /** The two calls this module makes. An `ApolloClient` satisfies it; so does a test fake. */
@@ -59,7 +68,7 @@ export type EscTourProgressGqlClient = {
 };
 
 const RECORD_FIELDS =
-  'id lastStepId outcome scriptVersion furthestStepIndex team';
+  'id lastStepId outcome scriptVersion furthestStepIndex team seenChapterVersions replayRequested';
 
 export const FIND_ESC_TOUR_PROGRESS = gql`
   query FindEscTourProgress($filter: EscTourProgressFilterInput) {
@@ -137,19 +146,33 @@ const OUTCOME_BY_EVENT: Record<
  * The fields one event writes. `furthestStepIndex` only ever grows, so Back and Start over
  * never make somebody look as if they gave up earlier than they did — the drop-out report
  * (#22316) is read off it.
+ *
+ * A run that ends also writes HOW it ended and when (`endReason`, `endedAt` — #22316) and,
+ * when the writer passes one, what the person has now seen (`seenChapters` — #22315). A run
+ * that opens clears the previous run's ending, so a row never reads as `inProgress` and
+ * `closed` at once.
  */
 export const buildEscTourProgressUpdate = (
   event: EscTourProgressEvent,
   furthestStepIndex: number,
   now: Date,
+  seenChapters?: EscTourSeenChapters,
 ): Record<string, unknown> => ({
   lastStepId: event.stepId,
   lastStepIndex: event.stepIndex,
+  lastChapter: event.chapter,
   furthestStepIndex: Math.max(furthestStepIndex, event.stepIndex),
   totalSteps: event.totalSteps,
   scriptVersion: event.scriptVersion,
   outcome: OUTCOME_BY_EVENT[event.kind],
   ...(event.kind === 'completed' ? { completedAt: now.toISOString() } : {}),
+  ...(event.kind === 'opened' ? { endReason: null, endedAt: null } : {}),
+  ...(event.endReason === undefined
+    ? {}
+    : { endReason: event.endReason, endedAt: now.toISOString() }),
+  ...(seenChapters === undefined
+    ? {}
+    : { seenChapterVersions: JSON.stringify(seenChapters) }),
 });
 
 export const updateEscTourProgress = async (

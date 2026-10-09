@@ -201,6 +201,12 @@ describe('startEscTourServerProgress', () => {
         scriptVersion: ESC_TOUR_SCRIPT_VERSION,
         outcome: 'completed',
         completedAt: NOW.toISOString(),
+        // RM #22316: how and when the run ended, and the step's chapter (none here).
+        lastChapter: null,
+        endReason: 'finished',
+        endedAt: NOW.toISOString(),
+        // RM #22315: these steps carry no chapter, so nothing new was seen.
+        seenChapterVersions: '{}',
       },
     });
   });

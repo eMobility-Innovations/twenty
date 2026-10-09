@@ -25,6 +25,7 @@ test-enterprise-behaviour.sh
 test-compare-dist-front.sh
 test-boot-smoke.sh
 test-provision-tour-progress.sh
+test-tour-admin-scripts.sh
 "
 
 FAILED_SUITES=""
