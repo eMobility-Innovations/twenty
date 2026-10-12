@@ -1,0 +1,9 @@
+# This repo is a fork of the upstream Twenty CRM. It exposes upstream's own
+# GraphQL/REST surface, not an org-built API, so the org OpenAPI-first standard
+# (versioned /api/vN, committed generated spec, drift gate) does not apply:
+# migrating it would diverge from upstream with every merge. Waived by operator
+# decision 2026-10-13 (session 24b8318a, follow-up to the pre-push shim rollout).
+
+waived = true
+reason = "Upstream Twenty CRM fork — serves upstream's API surface, not an org-built API; adopting the org OpenAPI layout would diverge from upstream."
+owner  = "patryk"
