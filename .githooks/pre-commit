@@ -140,6 +140,40 @@ _policy_bin() {
   if [ -f "$_pb_rt" ]; then printf '%s' "$_pb_rt"; else printf '%s' "$_pb_co"; fi
 }
 
+# Refuse direct trunk commits; operation continuations and the train may land.
+_td_branch="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
+_td_trunk="$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)"
+case "$_td_trunk" in
+  refs/remotes/origin/*) _td_trunk="${_td_trunk#refs/remotes/origin/}" ;;
+  *) _td_trunk=""
+     for _td_name in main master; do
+       if git show-ref --verify --quiet "refs/remotes/origin/$_td_name"; then
+         _td_trunk="$_td_name"; break
+       fi
+     done ;;
+esac
+if [ -n "$_td_trunk" ] && [ "$_td_branch" = "$_td_trunk" ]; then
+  _td_exempt=0
+  [ "${CLAUDE_TRUNK_PUSH_OK:-}" = "1" ] && _td_exempt=1
+  for _td_marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
+    [ ! -e "$(git rev-parse --git-path "$_td_marker")" ] || _td_exempt=1
+  done
+  _td_policy="$(_policy_bin trunk_direct_policy.py)"
+  if [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$_td_policy" ]; then
+    guard_unreachable "trunk identity exemption" "python3 or helper unavailable at $_td_policy; no identity exemption granted"
+  # Either the configured user.email OR the identity git will actually WRITE
+  # (`git var` honours GIT_COMMITTER_EMAIL and the hostname default): a host bot
+  # with no user.email (e.g. root@esc04.local) is matched as its commit records it.
+  elif python3 "$_td_policy" identity-exempt "$ROOT" "$(git config user.email || true)" \
+    || python3 "$_td_policy" identity-exempt "$ROOT" "$(git var GIT_COMMITTER_IDENT 2>/dev/null | sed -n 's/.*<\(.*\)>.*/\1/p')"; then
+    _td_exempt=1
+  fi
+  if [ "$_td_exempt" -eq 0 ]; then
+    printf 'Direct commits on / pushes to %s are refused.\nRun: git switch -c <type>/<topic>\nThen push the branch and run merge-queue.py --enqueue.\n' "$_td_trunk" >&2
+    exit 1
+  fi
+fi
+
 GUARD="$(_policy_bin openapi-guard.py)"
 if [ -z "$HOME_DIR" ]; then
   guard_unreachable "openapi gate" "no HOME could be resolved for this commit"
