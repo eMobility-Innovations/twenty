@@ -650,3 +650,27 @@ Swap the image back to `tour5`. The five fields can stay — `tour5` does not as
 - Report run on live data: 1 row (finished). `request-esc-tour-replay.cjs --member <Amir> --apply`
   set the flag on Amir's own row and read it back — the browser half (tour opens itself, flag
   clears) waits for his next CRM load; the Chrome extension was not connected from the session.
+
+## 2026-10-27 — nodemailer 10.2.1 (PR #48): the first SOURCE image in production
+
+The running `tour6` (option B + front layers) carried nodemailer 8.0.4. #48 changed server
+source (`smtp.driver.ts`, `smtp-client.provider.ts`), so a front layer cannot carry it: it needs
+`build-source-image.sh`. Done on CT140 from `a855be71` in `/root/twenty-esc-src`.
+
+- **Reset the checkout before every build:** `git reset --hard origin/emobility-unity && git clean -fdq -e node_modules`.
+  The overlay apply leaves the tree dirty, and a second run is refused by the tree guard.
+- **Always pass `--app-version 2.0.0`** (the semver upstream ships). `nm1` was built without it,
+  baked the git SHA, passed every build check AND the boot smoke test, then crash-looped on CT175
+  (`APP_VERSION must be a valid semantic version`). Rolled back to `tour6` in about two minutes
+  (compose backup `docker-compose.yml.nm1-failed` shows the bad state). The script now refuses a
+  non-semver value (PR #49, `tests/test-app-version-guard.sh`). The smoke test does not catch it
+  because it supplies its own env.
+- Carried CT140 -> workstation -> CT175 (sha256 `26d8acd1…` at all three), `docker load`, compose
+  lines 4 + 42 -> `twenty-esc-sso:v2.0.0-nm2`, `docker compose up -d`. Backup
+  `docker-compose.yml.bak-pre-nm2-20261027`; rollback image `tour6` still in the store and as
+  `/root/twenty-esc-sso_v2.0.0-tour6.tar.gz`; the new image is saved as
+  `/root/twenty-esc-sso_v2.0.0-nm2.tar.gz`.
+- Proof: `require('nodemailer/package.json').version` = 10.2.1 in BOTH server and worker;
+  `verify-esc-image.sh` 2/2; `verify-esc-tour.sh --container --anchors` 12/12; public `/healthz` 200;
+  the OIDC login route 302s to Keycloak with client `twenty-esc`. NOT done: a completed
+  browser sign-in (needs a person's Keycloak credentials).
