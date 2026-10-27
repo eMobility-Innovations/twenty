@@ -44,8 +44,14 @@ echo 0 > "$TMP/code"
 bash "$SCRIPT" --once > "$TMP/output" 2>&1
 check 'recovery exit' 0 "$?"
 check 'recovery clears cannot measure' 1 "$(has --state clear twenty-esc-image-watch:cannot-measure)"
+# Behaves like Docker 29.9.2 on CT175 (measured 2026-10-27): events.Message has no
+# top-level ID, so `--format '{{.ID}}'` exits at once and the watch never sees a start.
 cat > "$TMP/docker" <<'SH'
 printf '%s\n' "$*" > "$CASE_DIR/events"
+case "$*" in *'{{.ID}}'*)
+  echo 'Error parsing format: template: :1:2: executing "" at <.ID>: can'"'"'t evaluate field ID in type *events.Message' >&2
+  exit 1 ;;
+esac
 echo started-container
 exit 0
 SH
@@ -55,6 +61,6 @@ DOCKER="$TMP/docker" bash "$SCRIPT" > "$TMP/output" 2>&1; rc=$?
 check 'event stream ending is failure even on exit zero' 1 "$rc"
 check 'startup plus start event checks' 2 "$(wc -l < "$TMP/calls" | tr -d ' ')"
 check 'both checks report healthy' 2 "$(has --state clear twenty-esc-image-watch:bad-running-image)"
-check 'container start filters' 'events --filter type=container --filter event=start --filter container=twenty-esc-server-1 --format {{.ID}}' "$(cat "$TMP/events")"
+check 'container start filters' 'events --filter type=container --filter event=start --filter container=twenty-esc-server-1 --format {{.Actor.ID}}' "$(cat "$TMP/events")"
 printf '%s test(s), %s failed\n' "$((PASS+FAIL))" "$FAIL"
 [ "$FAIL" -eq 0 ]
