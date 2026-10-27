@@ -116,11 +116,15 @@ $DOCKER exec "${PG}" pg_isready -U postgres >/dev/null 2>&1 ||
   { die "throwaway Postgres never became ready"; exit 1; }
 ok "datastores up"
 
+# APP_VERSION is deliberately NOT supplied: production's compose does not set it either, so the
+# value BAKED INTO THE IMAGE governs, and the server refuses to boot on a non-semver one. A smoke
+# run that supplied its own (the old template did) booted green on nm1 (2026-10-27) while the
+# image crash-looped on CT175.
 say "2. production's key set, throwaway values"
 ENV_FILE="$(mktemp)"
 chmod 600 "${ENV_FILE}"
 grep -vE '^(#|$)' "${ENV_TEMPLATE}" \
-  | grep -vE '^(PG_DATABASE_URL|REDIS_URL|APP_SECRET)=' > "${ENV_FILE}"
+  | grep -vE '^(PG_DATABASE_URL|REDIS_URL|APP_SECRET|APP_VERSION)=' > "${ENV_FILE}"
 {
   echo "PG_DATABASE_URL=postgres://postgres:${PG_PASSWORD}@${PG}:5432/${PG_DB}"
   echo "REDIS_URL=redis://${REDIS}:6379"
