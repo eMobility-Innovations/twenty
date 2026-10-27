@@ -1,0 +1,16 @@
+[Unit]
+Description=ESC Twenty running-image watchdog
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+Environment=DOCKER=docker
+Environment=VERIFY=/opt/twenty-esc-image-watch/scripts/verify-esc-image.sh
+ExecStart=/opt/twenty-esc-image-watch/watch-esc-image.sh
+Restart=always
+RestartSec=30
+StateDirectory=twenty-esc-image-watch
+
+[Install]
+WantedBy=multi-user.target

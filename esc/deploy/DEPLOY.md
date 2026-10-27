@@ -678,5 +678,20 @@ source (`smtp.driver.ts`, `smtp-client.provider.ts`), so a front layer cannot ca
   `REFRESH_TOKEN` row appeared in `core."appToken"` at 09:47:51Z.
 - Since PR #51, `verify-esc-image.sh` also asserts the RUNNING container's `APP_VERSION` is semver
   (ran green on CT175 after the merge: 3/3), and `boot-smoke-test.sh` no longer overrides the
-  image's baked `APP_VERSION`, so `nm1`'s failure now fails the smoke test. Run
-  `verify-esc-image.sh` after EVERY compose edit, hand-made or not.
+  image's baked `APP_VERSION`, so `nm1`'s failure now fails the smoke test.
+
+### Running-image watchdog
+
+`watch-esc-image.sh` runs `verify-esc-image.sh` at startup and on every container start
+via `docker events`, without a polling timer. The systemd service reconnects if the
+event stream ends. Bad images page through the alert relay with fingerprint
+`twenty-esc-image-watch:bad-running-image`; inability to measure after three retries
+10 seconds apart raises a routine alert with fingerprint
+`twenty-esc-image-watch:cannot-measure`. Successful measurements clear a previous
+cannot-measure alert; healthy images clear the bad-image alert.
+
+CT175 has no checkout of this repo, so install from an archive of the trunk, as root on CT175:
+`git archive origin/emobility-unity esc/deploy scripts/verify-esc-image.sh | ssh <CT175> 'd=$(mktemp -d) && tar -x -C $d && bash $d/esc/deploy/install-image-watch.sh'`.
+The installer enables the service and prints the exit code of an immediate check.
+It preserves the verifier's `scripts/` and `esc/deploy/` probe layout under
+`/opt/twenty-esc-image-watch/`; the service sets `VERIFY` to that installed script.
