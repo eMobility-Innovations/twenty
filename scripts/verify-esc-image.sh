@@ -114,6 +114,11 @@ else
   fi
 fi
 
+# The server refuses to boot on a non-semver APP_VERSION (nm1, 2026-10-27, crash-looped ~2 min).
+# This asks the RUNNING container, so it also catches a hand-edited compose pointing at a bad image.
+check "APP_VERSION in the running container is a semantic version" \
+  "v=\$(${DOCKER} exec ${CONTAINER} sh -c 'printf %s \"\$APP_VERSION\"'); printf '%s' \"\$v\" | grep -Eq '^v?[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?\$' || { echo \"APP_VERSION='\$v'\"; exit 1; }"
+
 check "SSRF allowlist present in isPrivateIp" \
   "${DOCKER} exec ${CONTAINER} grep -q 'ESC_SSRF_ALLOWED_HOSTS' ${DIST}/engine/core-modules/secure-http-client/utils/is-private-ip.util.js"
 
