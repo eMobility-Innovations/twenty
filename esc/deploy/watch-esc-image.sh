@@ -59,7 +59,7 @@ esac
 check_once
 # Word splitting intentionally supports DOCKER='sudo docker', as the verifier does.
 $DOCKER events --filter type=container --filter event=start \
-  --filter container="$CONTAINER" --format '{{.ID}}' |
+  --filter container="$CONTAINER" --format '{{.Actor.ID}}' |
   while IFS= read -r event; do check_once; done
 echo "Docker event stream ended for $CONTAINER" >&2
 exit 1
