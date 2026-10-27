@@ -67,6 +67,14 @@ if [ -z "$APP_VERSION" ]; then
   APP_VERSION="$(git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)"
 fi
 
+# The server refuses to boot when APP_VERSION is not semver ("APP_VERSION must be a valid
+# semantic version"). The git-SHA fallback above produced exactly that: 2026-10-27 the nm1
+# image built, passed every check here and crash-looped on CT175 (rolled back in ~2 min).
+if ! printf '%s' "$APP_VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+  echo "build-source-image: APP_VERSION '${APP_VERSION}' is not a semantic version; the server will not boot with it. Pass --app-version 2.0.0 (or a v* tag at HEAD)." >&2
+  exit 1
+fi
+
 echo "==> Building ${IMAGE_TAG}"
 echo "    repo        : ${REPO_ROOT}"
 echo "    commit      : $(git rev-parse HEAD)"

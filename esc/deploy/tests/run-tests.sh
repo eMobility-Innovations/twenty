@@ -26,6 +26,7 @@ test-compare-dist-front.sh
 test-boot-smoke.sh
 test-provision-tour-progress.sh
 test-tour-admin-scripts.sh
+test-app-version-guard.sh
 "
 
 FAILED_SUITES=""
