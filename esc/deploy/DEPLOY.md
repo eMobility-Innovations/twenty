@@ -672,5 +672,11 @@ source (`smtp.driver.ts`, `smtp-client.provider.ts`), so a front layer cannot ca
   `/root/twenty-esc-sso_v2.0.0-nm2.tar.gz`.
 - Proof: `require('nodemailer/package.json').version` = 10.2.1 in BOTH server and worker;
   `verify-esc-image.sh` 2/2; `verify-esc-tour.sh --container --anchors` 12/12; public `/healthz` 200;
-  the OIDC login route 302s to Keycloak with client `twenty-esc`. NOT done: a completed
-  browser sign-in (needs a person's Keycloak credentials).
+  the OIDC login route 302s to Keycloak with client `twenty-esc`.
+- Completed sign-in, 2026-10-27 09:47Z: in the operator's already-signed-in Keycloak browser,
+  `/auth/oidc/login/<provider id>` went Keycloak -> callback -> the authenticated CRM, and a new
+  `REFRESH_TOKEN` row appeared in `core."appToken"` at 09:47:51Z.
+- Since PR #51, `verify-esc-image.sh` also asserts the RUNNING container's `APP_VERSION` is semver
+  (ran green on CT175 after the merge: 3/3), and `boot-smoke-test.sh` no longer overrides the
+  image's baked `APP_VERSION`, so `nm1`'s failure now fails the smoke test. Run
+  `verify-esc-image.sh` after EVERY compose edit, hand-made or not.
