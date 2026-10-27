@@ -6,9 +6,8 @@ SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/build-source-image.sh"
 PASS=0; FAIL=0
 check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL $1: want $2 got $3"; fi; }
 
-for bad in a855be71 abc 2.0 ""; do
+for bad in a855be71 abc 2.0 v1; do
   out="$(bash "$SCRIPT" --tag t:x --app-version "$bad" 2>&1)"; rc=$?
-  # an empty value falls back to the git SHA, which is also non-semver
   check "rc for '$bad'" 1 "$rc"
   case "$out" in *"not a semantic version"*) r=yes ;; *) r=no ;; esac
   check "message for '$bad'" yes "$r"
