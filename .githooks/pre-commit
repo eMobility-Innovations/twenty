@@ -140,6 +140,41 @@ _policy_bin() {
   if [ -f "$_pb_rt" ]; then printf '%s' "$_pb_rt"; else printf '%s' "$_pb_co"; fi
 }
 
+# Runtime-less fallback; the integration test pins the embedded rows to the JSON.
+_td_embedded_exempt() {
+  local url nwo row_repo row_email candidate
+  url="$(git remote get-url origin 2>/dev/null)" || return 1
+  case "$url" in
+    https://*|http://*|ssh://*) nwo="${url#*://}"; nwo="${nwo#*/}" ;;
+    *://*) return 1 ;;
+    *:*) nwo="${url#*:}" ;;
+    *) return 1 ;;
+  esac
+  while [[ "$nwo" = /* ]]; do nwo="${nwo#/}"; done
+  while [[ "$nwo" = */ ]]; do nwo="${nwo%/}"; done
+  nwo="${nwo%.git}"
+  candidate="$(printf '%s\t%s' "$nwo" "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  # The embedded fallback ignores CLAUDE_TRUNK_DIRECT_IDENTITIES on purpose: a runtime-less host
+  # has no override file to point it at. A new identity must be added here, in the other hook's
+  # copy AND in policy/trunk-direct-identities.json — the drift tests fail until all three agree.
+  # Embedded declaration: test_embedded_list_matches_declaration pins these rows.
+  while IFS=$'\t' read -r row_repo row_email; do
+    [[ "$candidate" = "$(printf '%s\t%s' "$row_repo" "$row_email" | LC_ALL=C tr '[:upper:]' '[:lower:]')" ]] && return 0
+  done <<'TD_IDENTITIES'
+eMobility-Innovations/proxmox-fleet-manager	root@esc04.local
+eMobility-Innovations/internal-knowledge-base	alert-backlog@escooterclinic.co.uk
+eMobility-Innovations/fleet-host-rail	fleet@escooterclinic.co.uk
+eMobility-Innovations/claude-code-policy	fleet@escooterclinic.co.uk
+eMobility-Innovations/litellm-key-manager	litellm-key-manager@escooterclinic.co.uk
+eMobility-Innovations/escooters-dojo	dojo-groups-reconcile@escooterclinic.co.uk
+eMobility-Innovations/proxmox-fleet-node-inventory	fleet@escooterclinic.co.uk
+eMobility-Innovations/litellm-deploy	vllm-identity-refresh@users.noreply.github.com
+eMobility-Innovations/vllm-deploy	vllm-identity-refresh@users.noreply.github.com
+eMobility-Innovations/litellm-deploy	noreply@emobility-innovations
+TD_IDENTITIES
+  return 1
+}
+
 # Refuse direct trunk commits; operation continuations and the train may land.
 _td_branch="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
 _td_trunk="$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)"
@@ -160,7 +195,11 @@ if [ -n "$_td_trunk" ] && [ "$_td_branch" = "$_td_trunk" ]; then
   done
   _td_policy="$(_policy_bin trunk_direct_policy.py)"
   if [ "$HAVE_PY3" -eq 0 ] || [ ! -f "$_td_policy" ]; then
-    guard_unreachable "trunk identity exemption" "python3 or helper unavailable at $_td_policy; no identity exemption granted"
+    guard_unreachable "trunk identity exemption" "python3 or helper unavailable at $_td_policy; embedded declaration used"
+    if _td_embedded_exempt "$(git config user.email || true)" \
+      || _td_embedded_exempt "$(git var GIT_COMMITTER_IDENT 2>/dev/null | sed -n 's/.*<\(.*\)>.*/\1/p')"; then
+      _td_exempt=1
+    fi
   # Either the configured user.email OR the identity git will actually WRITE
   # (`git var` honours GIT_COMMITTER_EMAIL and the hostname default): a host bot
   # with no user.email (e.g. root@esc04.local) is matched as its commit records it.
@@ -173,6 +212,7 @@ if [ -n "$_td_trunk" ] && [ "$_td_branch" = "$_td_trunk" ]; then
     exit 1
   fi
 fi
+unset -f _td_embedded_exempt
 
 GUARD="$(_policy_bin openapi-guard.py)"
 if [ -z "$HOME_DIR" ]; then
