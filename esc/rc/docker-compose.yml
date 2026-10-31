@@ -1,0 +1,82 @@
+name: twenty-rc
+services:
+  server:
+    image: twentycrm/twenty:${TAG:?TAG must be set in .env}
+    volumes:
+      - server-local-data:/app/packages/twenty-server/.local-storage
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://postgres:${PG_DATABASE_PASSWORD}@db:5432/default
+      SERVER_URL: https://rc.crm.fiszu.com
+      REDIS_URL: redis://redis:6379
+      STORAGE_TYPE: local
+      APP_SECRET: ${APP_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env (Twenty >= 2.5)}
+      ENTERPRISE_KEY: self-hosted-rc
+      IS_BILLING_ENABLED: "false"
+      EMAIL_DRIVER: smtp
+      EMAIL_SMTP_HOST: email-proxy.ha-nonhttp.fiszu.com
+      EMAIL_SMTP_PORT: 25
+      EMAIL_SMTP_NO_TLS: "true"
+      EMAIL_FROM_ADDRESS: crm@fiszu.com
+      EMAIL_FROM_NAME: Twenty CRM RC
+      EMAIL_SYSTEM_ADDRESS: crm@fiszu.com
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: curl --fail http://localhost:3000/healthz
+      interval: 30s
+      timeout: 5s
+      retries: 10
+    restart: always
+  worker:
+    image: twentycrm/twenty:${TAG:?TAG must be set in .env}
+    volumes:
+      - server-local-data:/app/packages/twenty-server/.local-storage
+    command: ["yarn", "worker:prod"]
+    environment:
+      PG_DATABASE_URL: postgres://postgres:${PG_DATABASE_PASSWORD}@db:5432/default
+      SERVER_URL: https://rc.crm.fiszu.com
+      REDIS_URL: redis://redis:6379
+      STORAGE_TYPE: local
+      APP_SECRET: ${APP_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env (Twenty >= 2.5)}
+      ENTERPRISE_KEY: self-hosted-rc
+      IS_BILLING_ENABLED: "false"
+      DISABLE_DB_MIGRATIONS: "true"
+      DISABLE_CRON_JOBS_REGISTRATION: "true"
+    depends_on:
+      db: { condition: service_healthy }
+      server: { condition: service_healthy }
+    restart: always
+  db:
+    image: postgres:16
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: default
+      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD}
+    healthcheck:
+      test: pg_isready -U postgres -h localhost -d postgres
+      interval: 30s
+      timeout: 5s
+      retries: 2
+    restart: always
+  redis:
+    image: redis
+    restart: always
+    volumes:
+      - redis-data:/data
+    command: ["--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 2
+volumes:
+  db-data:
+  server-local-data:
+  redis-data:
