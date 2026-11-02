@@ -62,6 +62,7 @@ import re
 import sys
 import time
 import urllib.request
+from datetime import datetime, timezone
 
 CONTRACT_VERSION = "v1"
 # THE VERSION THE DRIFT DETECTOR READS. It exists because without it there was no way
@@ -72,7 +73,7 @@ CONTRACT_VERSION = "v1"
 # getting the old client, and `policy/vendored-artefacts.json` could not notice because
 # its `alert-client` entry was disabled for want of a version to compare and an upstream
 # to compare it with. Both are now declared. BUMP THIS on every change to this file.
-CLIENT_VERSION = "1.20.0"
+CLIENT_VERSION = "1.21.0"
 # THE NAME. Was `alert-relay.ha.fiszu.com` from 2026-08-12; changed 2026-08-18 because
 # that name CANNOT work from outside the LAN and never could. Public DNS sends `.ha` names
 # to Cloudflare, whose Universal SSL certificate covers `fiszu.com, *.fiszu.com` — ONE
@@ -482,6 +483,17 @@ def _rung_failures(failures) -> str:
     return " | ".join(f"rung {i}: {f}" for i, f in enumerate(failures, 1))
 
 
+def _declared_iso(value) -> str:
+    """Epoch seconds as ISO-8601 UTC (`...Z`), or "" when it is not a usable deadline."""
+    try:
+        ts = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if not 0 < ts < float("inf"):           # NaN fails both comparisons
+        return ""
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _text(value) -> str:
     return "" if value is None else str(value).strip()
 
@@ -672,7 +684,8 @@ class AlertClient:
              runbook: str = "", immediate_escalation: bool = False,
              channel: str = "", username: str = "", mode: str = "",
              unearned: bool = False, notice: bool = False,
-             record_only: bool = False) -> dict:
+             record_only: bool = False,
+             next_reassert_by: float | None = None) -> dict:
         """Build, validate-and-FIX, deliver or spool. Never raises, never drops.
 
         `fingerprint` must be STABLE across occurrences — it is the identity every dedup,
@@ -690,6 +703,11 @@ class AlertClient:
         pulse is read by producer-silence, never by a human); on anything else it is
         ignored and the alert is delivered as always.
 
+        `next_reassert_by` (epoch seconds, a FIRE only) is this producer's promise: "if this
+        is still true I will post it again by then". The relay judges the condition's silence
+        against it, so a producer inside its own backoff gap is not auto-retired and re-paged
+        as a fresh episode (find 2026-11-01). Omit it unless you will really re-assert by then.
+
         `mode` IS IN THIS SIGNATURE BECAUSE IT WAS NOT, AND THAT DROPPED ALERTS. `_build`
         has read `kw.get("mode")` since 1.6.0, but this method — which `fire()` and
         `clear()` both funnel through — listed its arguments explicitly and omitted it,
@@ -706,7 +724,7 @@ class AlertClient:
                              immediate_escalation=immediate_escalation,
                              channel=channel, username=username, mode=mode,
                              unearned=unearned, notice=notice,
-                             record_only=record_only)
+                             record_only=record_only, next_reassert_by=next_reassert_by)
         self.flush_spool()
         return self._deliver(payload)
 
@@ -953,6 +971,12 @@ class AlertClient:
         # producers being merely untidy. This field is what separates them.
         if kw.get("unearned"):
             payload["unearned"] = True
+        # ------------------------------------------------- the producer's next re-assert
+        # OMITTED WHEN UNSET or meaningless (a clear, a non-finite or non-positive value), so
+        # every producer that does not declare sends byte-for-byte what it sent before.
+        declared = _declared_iso(kw.get("next_reassert_by")) if state == STATE_FIRE else ""
+        if declared:
+            payload["next_reassert_by"] = declared
         # ---------------------------------------------------------------- delivery mode
         # STATE IT. `mode="relay"` posts this alert on its own, immediately;
         # `mode="summary"` lets the relay bundle it with whatever else is due for the
