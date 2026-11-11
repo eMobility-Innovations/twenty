@@ -73,7 +73,7 @@ CONTRACT_VERSION = "v1"
 # getting the old client, and `policy/vendored-artefacts.json` could not notice because
 # its `alert-client` entry was disabled for want of a version to compare and an upstream
 # to compare it with. Both are now declared. BUMP THIS on every change to this file.
-CLIENT_VERSION = "1.21.0"
+CLIENT_VERSION = "1.23.0"
 # THE NAME. Was `alert-relay.ha.fiszu.com` from 2026-08-12; changed 2026-08-18 because
 # that name CANNOT work from outside the LAN and never could. Public DNS sends `.ha` names
 # to Cloudflare, whose Universal SSL certificate covers `fiszu.com, *.fiszu.com` — ONE
@@ -685,7 +685,8 @@ class AlertClient:
              channel: str = "", username: str = "", mode: str = "",
              unearned: bool = False, notice: bool = False,
              record_only: bool = False,
-             next_reassert_by: float | None = None) -> dict:
+             next_reassert_by: float | None = None, shape: str | None = None,
+             max_backoff_seconds: int | None = None) -> dict:
         """Build, validate-and-FIX, deliver or spool. Never raises, never drops.
 
         `fingerprint` must be STABLE across occurrences — it is the identity every dedup,
@@ -703,10 +704,19 @@ class AlertClient:
         pulse is read by producer-silence, never by a human); on anything else it is
         ignored and the alert is delivered as always.
 
+        `shape="event"` marks a self-closing event pair: its clear must not cancel a
+        fire held by the relay flood ceiling. Omit it for state-shaped conditions.
+
         `next_reassert_by` (epoch seconds, a FIRE only) is this producer's promise: "if this
         is still true I will post it again by then". The relay judges the condition's silence
         against it, so a producer inside its own backoff gap is not auto-retired and re-paged
         as a fresh episode (find 2026-11-01). Omit it unless you will really re-assert by then.
+
+        `max_backoff_seconds` (a FIRE only) caps the relay's re-post ladder for this condition:
+        "never hold my re-posts longer than this". It can only LOWER the 24h ceiling, and the
+        relay floors it at the severity's base window, so passing that window (3600 for major)
+        means "cap at the first backoff step". For conditions a human must see on every
+        recurrence, such as HA quorum or failover; omit it everywhere else.
 
         `mode` IS IN THIS SIGNATURE BECAUSE IT WAS NOT, AND THAT DROPPED ALERTS. `_build`
         has read `kw.get("mode")` since 1.6.0, but this method — which `fire()` and
@@ -724,7 +734,8 @@ class AlertClient:
                              immediate_escalation=immediate_escalation,
                              channel=channel, username=username, mode=mode,
                              unearned=unearned, notice=notice,
-                             record_only=record_only, next_reassert_by=next_reassert_by)
+                             record_only=record_only, next_reassert_by=next_reassert_by,
+                             shape=shape, max_backoff_seconds=max_backoff_seconds)
         self.flush_spool()
         return self._deliver(payload)
 
@@ -944,6 +955,8 @@ class AlertClient:
             "runbook": runbook,
             "channel": _text(kw.get("channel")) or self.channel,
         }
+        if kw.get("shape") == "event":
+            payload["shape"] = "event"
         # OMITTED WHEN UNSET, never sent as "". The relay reads `raw.get("username") or
         # service`, so an empty string would fall through to the same default — but an
         # absent key and an empty one are different claims, and every existing producer
@@ -977,6 +990,13 @@ class AlertClient:
         declared = _declared_iso(kw.get("next_reassert_by")) if state == STATE_FIRE else ""
         if declared:
             payload["next_reassert_by"] = declared
+        # ------------------------------------------------- the producer's ladder ceiling
+        # OMITTED WHEN UNSET or meaningless (a clear, a bool, a non-positive value), so every
+        # producer that does not declare sends byte-for-byte what it sent before.
+        ceiling = kw.get("max_backoff_seconds")
+        if (state == STATE_FIRE and isinstance(ceiling, int) and not isinstance(ceiling, bool)
+                and ceiling > 0):
+            payload["max_backoff_seconds"] = ceiling
         # ---------------------------------------------------------------- delivery mode
         # STATE IT. `mode="relay"` posts this alert on its own, immediately;
         # `mode="summary"` lets the relay bundle it with whatever else is due for the
