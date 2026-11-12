@@ -140,6 +140,16 @@ _policy_bin() {
   if [ -f "$_pb_rt" ]; then printf '%s' "$_pb_rt"; else printf '%s' "$_pb_co"; fi
 }
 
+# Credential scanning shares one verdict contract across commit, push and merge.
+GITLEAKS_GUARD="$(_policy_bin gitleaks-staged-guard.py)"
+if [ "$HAVE_PY3" -eq 1 ] && [ -f "$GITLEAKS_GUARD" ]; then
+  python3 "$GITLEAKS_GUARD" staged --repo "$ROOT" </dev/null
+  GITLEAKS_RC=$?
+  [ "$GITLEAKS_RC" -eq 0 ] || exit "$GITLEAKS_RC"
+else
+  guard_unreachable "gitleaks scanner" "python3 or guard unavailable at $GITLEAKS_GUARD"
+fi
+
 # Runtime-less fallback; the integration test pins the embedded rows to the JSON.
 _td_embedded_exempt() {
   local url nwo row_repo row_email candidate
