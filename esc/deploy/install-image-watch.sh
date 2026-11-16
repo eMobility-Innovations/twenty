@@ -13,6 +13,7 @@ install -m 755 "$HERE/watch-esc-image.sh" "$DEST/watch-esc-image.sh"
 # Preserve the verifier's existing ../esc/deploy probe lookup without modifying it.
 install -m 755 "$HERE/../../scripts/verify-esc-image.sh" "$DEST/scripts/verify-esc-image.sh"
 install -m 644 "$HERE/enterprise-behaviour-probe.cjs" "$DEST/esc/deploy/enterprise-behaviour-probe.cjs"
+install -m 644 "$HERE/dependency-floor-probe.cjs" "$DEST/esc/deploy/dependency-floor-probe.cjs"
 install -m 644 "$HERE/alert_client.py" "$DEST/alert_client.py"
 install -m 644 "$HERE/systemd/twenty-esc-image-watch.service" /etc/systemd/system/
 systemctl daemon-reload

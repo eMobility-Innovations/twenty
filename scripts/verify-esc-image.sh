@@ -119,6 +119,33 @@ fi
 check "APP_VERSION in the running container is a semantic version" \
   "v=\$(${DOCKER} exec ${CONTAINER} sh -c 'printf %s \"\$APP_VERSION\"'); printf '%s' \"\$v\" | grep -Eq '^v?[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?\$' || { echo \"APP_VERSION='\$v'\"; exit 1; }"
 
+# Dependabot reads the lockfile; this reads the image. A copy of a package below the
+# security floor this fork already reached (deps1-deps3, 2026-11-16) fails here, so an
+# upstream merge or lockfile regeneration that brings one back pages on container start.
+FLOOR_PROBE="$(cd "$(dirname "$0")/.." && pwd)/esc/deploy/dependency-floor-probe.cjs"
+if [ ! -f "${FLOOR_PROBE}" ]; then
+  echo "  FAIL dependency floor probe missing at ${FLOOR_PROBE}"
+  FAIL=$((FAIL+1))
+else
+  FLOOR_STATUS=0
+  FLOOR_REPORT="$(${DOCKER} exec -i "${CONTAINER}" node - < "${FLOOR_PROBE}" 2>&1)" || FLOOR_STATUS=$?
+  FLOOR_VERDICT="$(printf '%s\n' "${FLOOR_REPORT}" | grep '^ESC_DEP_FLOOR_VERDICT:' || true)"
+  if [ "${FLOOR_STATUS}" -ne 0 ] || [ -z "${FLOOR_VERDICT}" ]; then
+    echo "CANNOT MEASURE — the dependency floor probe did not complete inside ${CONTAINER}" >&2
+    printf '%s\n' "${FLOOR_REPORT}" | tail -5 | sed 's/^/  /' >&2
+    exit 3
+  fi
+  case "${FLOOR_VERDICT}" in
+    'ESC_DEP_FLOOR_VERDICT: ok '*)
+      echo "  PASS no package below its security floor (${FLOOR_VERDICT#ESC_DEP_FLOOR_VERDICT: ok })"
+      PASS=$((PASS+1)) ;;
+    *)
+      echo "  FAIL packages below their security floor in the running image:"
+      printf '%s\n' "${FLOOR_REPORT}" | grep '^ESC_DEP_FLOOR_BELOW:' | sed 's/^ESC_DEP_FLOOR_BELOW: /       /'
+      FAIL=$((FAIL+1)) ;;
+  esac
+fi
+
 check "SSRF allowlist present in isPrivateIp" \
   "${DOCKER} exec ${CONTAINER} grep -q 'ESC_SSRF_ALLOWED_HOSTS' ${DIST}/engine/core-modules/secure-http-client/utils/is-private-ip.util.js"
 
