@@ -29,7 +29,11 @@ const FLOORS = {
   'websocket-driver': '0.7.5', // GHSA-xv26-6w52-cph6
 };
 
-const ROOTS = (process.env.ESC_FLOOR_ROOTS || '/app/node_modules,/usr/local/lib/node_modules')
+// /app/node_modules is the tree this fork's yarn.lock owns. The base image's bundled npm
+// (/usr/local/lib/node_modules) moves only with the Node pin in the overlay Dockerfile,
+// an operator decision; deps3 still carries npm's tar 7.5.11 there (npm is never spawned
+// at runtime). Add that root back when Node moves.
+const ROOTS = (process.env.ESC_FLOOR_ROOTS || '/app/node_modules')
   .split(',')
   .filter(Boolean);
 

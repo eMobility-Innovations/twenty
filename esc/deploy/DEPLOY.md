@@ -748,3 +748,46 @@ container), the fix trivial: `yarn up -R proxy-addr` -> 2.0.8, lockfile only.
 holds only 4.7.10. The `twenty-apps/community/fireflies/yarn.lock` handlebars alerts are an app not in
 the image. The RC CRM on CT175 runs upstream `twentycrm/twenty:v2.57.1`, which already ships
 proxy-addr 2.0.8 / handlebars 4.7.10; this fork's lockfile alerts do not map to it.
+
+## 2026-11-16 — the last two criticals (PR #66) + floor watchdog (PR #67): `twenty-esc-sso:v2.0.0-deps3`
+
+70 criticals were still open. Each package was looked up in the RUNNING deps2 server and worker by a
+`find` over every `node_modules/*/package.json` (not by alert scope). Only **tar** was there below its
+fix: 6.2.1 at `/app/node_modules/{@mapbox/node-pre-gyp,cacache,node-gyp}/node_modules/tar`, plus
+7.5.13 in the logic-function seed lock (`dist/assets/.../seed-dependencies/yarn.lock`). Loading
+bcrypt and `@sentry/profiling-node` pulls no tar copy into `require.cache`, so it was install-time
+tooling; it was in the artefact all the same. form-data is present only as 4.0.4/4.0.5 (patched).
+
+- **Outsider reach.** Everything except `/healthz` (and `/rest/*`, which Twenty answers 403
+  "Missing authentication token") 302s to Keycloak at the edge. Self-registration is off in realm
+  `fiszu` ("Registration not allowed" from `.../openid-connect/registrations`, checked from the
+  workstation 2026-11-16) and the login page offers no identity brokers. So no outsider and no
+  self-signup chain reaches the app. The workspace's public invite link is on, but only behind that edge.
+- **sandboxjs / workflow code steps.** `@nyariv/sandboxjs` is absent from the image and from `dist`;
+  its only parent is the devDependency `@nestjs/devtools-integration`. Code steps run through the
+  logic-function driver, which is DISABLED here (`LOGIC_FUNCTION_TYPE` and `CODE_INTERPRETER_TYPE`
+  unset in env and in `core."keyValuePair"`, `NODE_ENV` unset; `core."logicFunction"` has 0 rows).
+- **#66**: parent-scoped resolutions `@mapbox/node-pre-gyp/tar`, `cacache/tar`, `node-gyp/tar` ->
+  `^7.5.23`. The seed lock was regenerated in range (tar 7.5.23), which also locked nodemailer to
+  the manifest's `>=10.2.1 <11` (declared in 79a5f000610, never locked).
+- **68 alerts dismissed** `not_used` with the evidence in each comment (sandboxjs 10, next 14,
+  vitest/storybook/tinypool/piscina/happy-dom/@vitest/browser/@xhmikosr/decompress 25, handlebars 6,
+  form-data 2, shell-quote, websocket-driver, twenty-apps tar 9). #1868 and #1449 (tar) close on #66.
+- Built on CT140 from `ec0c8084` (the #66 merge): feature checks 3/3 + boot smoke PASSED. Image
+  `8527fd0ef0df` on CT140 and CT175, tarball sha256 `6930817a…a4de`, copied over the LAN as before.
+- Compose lines 4 + 42 -> `deps3`, backup `docker-compose.yml.bak-pre-deps3-20261116`, `up -d server worker`.
+- Proof: server AND worker report no nested tar (floor probe below), tar 7.5.23, proxy-addr 2.0.8,
+  handlebars 4.7.10, protobufjs 7.6.6, bcrypt hashes and compares; 0 restarts; watchdog 3 passed
+  (13:33:45Z); public `/healthz` 200, `/` 302 to Keycloak.
+- Rollback: lines 4 + 42 back to `deps2` (image in the store), `up -d server worker`.
+
+**Watchdog (#67, scoped in the deps3 record PR).** `verify-esc-image.sh` now runs
+`dependency-floor-probe.cjs` in the container: any copy of proxy-addr, handlebars, protobufjs, tar,
+form-data, sandboxjs, shell-quote or websocket-driver below the version this fork already reached is
+a FAIL, paged by the image watchdog on container start. Fired live against deps2:
+`below=4` (the three nested tar 6.2.1 and npm's tar 7.5.11); against deps3 (`/app`): ok.
+
+**Still in the image, decision pending:** the base image's npm (`node:24.15.0-alpine`, pinned by
+digest as the operator's call) bundles tar 7.5.11. npm is never spawned by the server (no
+npm/yarn spawn in `dist`), and no Dependabot alert covers it. `node:24-alpine` today (v24.22.3)
+ships npm 11.19.1 with tar 7.5.22. The probe scans `/app/node_modules` only until Node moves.
