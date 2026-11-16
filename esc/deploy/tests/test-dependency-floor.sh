@@ -69,7 +69,7 @@ case "$1" in
     case "$*" in
       *'node -'*)
         script="$(cat)"
-        if printf '%s' "${script}" | grep -q ESC_DEP_FLOOR_VERDICT; then
+        if grep -q ESC_DEP_FLOOR_VERDICT <<<"${script}"; then
           printf '%s' "${script}" | ESC_FLOOR_ROOTS="${FLOOR_FIXTURE}/node_modules" node -
         else
           echo 'ESC_ENTERPRISE_VERDICT: isValid=true hasValidEnterpriseValidityToken=true licenceIsValid=true subscriptionActive=true'
