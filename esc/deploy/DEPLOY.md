@@ -695,3 +695,25 @@ CT175 has no checkout of this repo, so install from an archive of the trunk, as 
 The installer enables the service and prints the exit code of an immediate check.
 It preserves the verifier's `scripts/` and `esc/deploy/` probe layout under
 `/opt/twenty-esc-image-watch/`; the service sets `VERIFY` to that installed script.
+
+## 2026-11-16 — dependency criticals (PR #62): `twenty-esc-sso:v2.0.0-deps1`
+
+Dependabot listed 72 criticals on this fork. Read from the RUNNING `nm2` containers, only three
+were in the image: handlebars 4.7.9 (GHSA-8r5x-fm3f-whwj, 9.8), protobufjs 7.5.3
+(GHSA-xq3m-2v4x-88gg, 9.8), tar 7.5.13 (GHSA-23hp-3jrh-7fpw, 7.5). #62 bumps them in-range in
+`yarn.lock` (4.7.10 / 7.6.6 / 7.5.23). The rest is not in the image: `@nyariv/sandboxjs` arrives only
+through the devDependency `@nestjs/devtools-integration` (its registration in `app.module.ts` is
+commented out, and no copy exists under `/app`); `next` is the marketing sites; vitest, storybook,
+tinypool, `@vitest/browser`, `twenty-apps/*` are dev or not shipped. `tar` 6.2.1 remains under
+node-gyp/cacache (install-time tooling; no 6.x fix exists).
+
+- Built on CT140 from `95b20a64` (the #62 merge): `build-source-image.sh --tag
+  twenty-esc-sso:v2.0.0-deps1 --app-version 2.0.0`; feature checks + boot smoke PASSED.
+- Tarball sha256 `8f73c7f9…d53755`, identical on CT140, the workstation and CT175. Pangolin
+  measured ~0.3 MB/s CT175-bound, so the copy went CT140 -> CT175 over the LAN (a short-lived
+  `python3 -m http.server` bound to 192.168.103.140, removed after).
+- Compose lines 4 + 42 -> `deps1`, backup `docker-compose.yml.bak-pre-deps1-20261116`, `up -d server worker`.
+- Proof: server AND worker report handlebars 4.7.10, protobufjs 7.6.6, tar 7.5.23; 0 restarts;
+  `verify-esc-image.sh` 3/3 (also run by the image watchdog on the container start, 08:22:46Z);
+  `assert-esc-schema.sh` OK; public `/healthz` 200, `/` 302 to Keycloak.
+- Rollback: lines 4 + 42 back to `nm2` (image in the store, `/root/twenty-esc-sso_v2.0.0-nm2.tar.gz`), `up -d server worker`.
