@@ -28,6 +28,7 @@ test-provision-tour-progress.sh
 test-tour-admin-scripts.sh
 test-app-version-guard.sh
 test-image-watch.sh
+test-dependency-floor.sh
 "
 
 FAILED_SUITES=""
