@@ -698,8 +698,12 @@ It preserves the verifier's `scripts/` and `esc/deploy/` probe layout under
 
 ## 2026-11-16 — dependency criticals (PR #62): `twenty-esc-sso:v2.0.0-deps1`
 
-Dependabot listed 72 criticals on this fork. Read from the RUNNING `nm2` containers, only three
-were in the image: handlebars 4.7.9 (GHSA-8r5x-fm3f-whwj, 9.8), protobufjs 7.5.3
+> **Correction (deps2, below):** "only three" was wrong. A fourth, proxy-addr 2.0.7
+> (GHSA-jqcg-44mw-7w3h, 9.1, alert #2069), was in the image too; Dependabot labels it
+> `development`, and that label was trusted instead of reading `/app/node_modules`.
+
+Dependabot listed 72 criticals on this fork. Read from the RUNNING `nm2` containers, three of the
+criticals found in the image were: handlebars 4.7.9 (GHSA-8r5x-fm3f-whwj, 9.8), protobufjs 7.5.3
 (GHSA-xq3m-2v4x-88gg, 9.8), tar 7.5.13 (GHSA-23hp-3jrh-7fpw, 7.5). #62 bumps them in-range in
 `yarn.lock` (4.7.10 / 7.6.6 / 7.5.23). The rest is not in the image: `@nyariv/sandboxjs` arrives only
 through the devDependency `@nestjs/devtools-integration` (its registration in `app.module.ts` is
@@ -717,3 +721,30 @@ node-gyp/cacache (install-time tooling; no 6.x fix exists).
   `verify-esc-image.sh` 3/3 (also run by the image watchdog on the container start, 08:22:46Z);
   `assert-esc-schema.sh` OK; public `/healthz` 200, `/` 302 to Keycloak.
 - Rollback: lines 4 + 42 back to `nm2` (image in the store, `/root/twenty-esc-sso_v2.0.0-nm2.tar.gz`), `up -d server worker`.
+
+## 2026-11-16 — proxy-addr critical (PR #64): `twenty-esc-sso:v2.0.0-deps2`
+
+The deps1 triage missed one: proxy-addr 2.0.7 (GHSA-jqcg-44mw-7w3h, 9.1, alert #2069) sits at
+`/app/node_modules/proxy-addr` and is what Express resolves on every request, unauthenticated ones
+(`/healthz`) included. Dependabot scopes the alert `development`; that label is wrong for this
+image, so **triage reads `/app/node_modules` in the running container, never the alert's scope**.
+Real risk was low (default `TRUST_PROXY` `loopback, linklocal, uniquelocal`, no override in the
+container), the fix trivial: `yarn up -R proxy-addr` -> 2.0.8, lockfile only.
+
+- Built on CT140 from `bdb0cd64` (the #64 merge): `build-source-image.sh --tag
+  twenty-esc-sso:v2.0.0-deps2 --app-version 2.0.0`; feature checks 3/3 + boot smoke PASSED.
+  (The checkout carried the untracked overlay output `packages/twenty-front/src/modules/esc-tour/`
+  from the last apply; `assert-tree-accounted-for` refuses that, `git clean` on that path fixes it.)
+- Tarball sha256 `dc54572f…68ef75`, identical on CT140 and CT175, copied over the LAN as for deps1.
+- Compose lines 4 + 42 -> `deps2`, backup `docker-compose.yml.bak-pre-deps2-20261116`, `up -d server worker`.
+- Proof: server AND worker report proxy-addr 2.0.8 (`require.resolve` from express ->
+  `/app/node_modules/proxy-addr` 2.0.8), handlebars 4.7.10, protobufjs 7.6.6, tar 7.5.23; 0 restarts;
+  image watchdog 3 passed on the container start (09:56:56Z); public `/healthz` 200, `/` 302 to Keycloak.
+- Rollback: lines 4 + 42 back to `deps1` (image in the store), `up -d server worker`.
+
+**Alerts that stay open and are mapping noise:** handlebars #2080, #2082, #1677 (and the lower
+#2081, #1686, #1685, #1681, #1680, #1678, #1672) — root `yarn.lock` still carries
+`handlebars@npm:4.7.8`, pinned exactly by `@verdaccio/hooks` (local-registry dev tooling); the image
+holds only 4.7.10. The `twenty-apps/community/fireflies/yarn.lock` handlebars alerts are an app not in
+the image. The RC CRM on CT175 runs upstream `twentycrm/twenty:v2.57.1`, which already ships
+proxy-addr 2.0.8 / handlebars 4.7.10; this fork's lockfile alerts do not map to it.
