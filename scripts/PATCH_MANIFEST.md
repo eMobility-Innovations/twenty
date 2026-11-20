@@ -11,7 +11,7 @@ upstream checkout (backing up originals to `.esc-originals/`); re-running
 - **Branch:** `esc/enterprise-sso-overlay`
 - **Upstream base:** `eMobility-Innovations/twenty` @ `emobility-unity` (a fork of
   `twentyhq/twenty`), Twenty **v2.0.x** line.
-- **Last updated:** 2026-09-23
+- **Last updated:** 2026-11-20
 - **Status:** LIVE. Option B (compiled patches on the official image) is what runs on
   CT 175 as `twenty-esc-sso:*`. The "scaffold only, image NOT yet built" line that stood
   here was true on 2026-06-04 and wrong from 2026-06-05 onward — the image was built and
@@ -22,7 +22,7 @@ upstream checkout (backing up originals to `.esc-originals/`); re-running
 ## Overview
 
 ESC runs a self-hosted Twenty instance (`esc.crm.fiszu.com`, CT 175 stack
-`twenty-esc`). On Twenty **v2.0** the fork carries **three** customizations, no more:
+`twenty-esc`). On Twenty **v2.0** the fork carries **five** overlay customizations:
 
 1. **Enterprise feature unlocking (SSO)** — remove the Organization-license gate
    so SAML / generic-OIDC SSO (our **Keycloak** `fiszu` realm) and the SSO settings
@@ -47,7 +47,11 @@ ESC runs a self-hosted Twenty instance (`esc.crm.fiszu.com`, CT 175 stack
    the product (Redmine #19873). One upstream file overlaid, everything else in ESC-owned
    code under `esc/new/`. Category 3 below.
 
-That is the entire patch surface today. Everything else is upstream-stock.
+4. **A digest-pinned Node base image** — all three Node stages use the same
+   version and digest. Category 4 below.
+
+5. **Nodemailer 10 SMTP type compatibility** — two server files use SMTP
+   transport types compatible with the security floor. Category 5 below.
 
 **Verifying what is RUNNING:** `scripts/verify-esc-features.sh` checks the source overlay;
 `scripts/verify-esc-image.sh` checks the built image inside the running container. Use the
@@ -222,9 +226,8 @@ overlay, the anchor resolver, the placement maths and the script.
 Four properties are part of the contract, not details:
 
 - **No new npm dependency.** A tour library (driver.js and friends) would mean a permanent
-  `package.json` and `yarn.lock` divergence to reconcile on every upstream sync, and neither
-  file is allowlisted by `verify.sh`'s fork-scope check. The overlay is only survivable
-  because it is small.
+  `package.json` and `yarn.lock` divergence to reconcile on every upstream sync. The overlay
+  is only survivable because it is small.
 - **Anchors are ROUTES, never class names.** A step points at `a[href="/objects/people"]`. A
   route is part of the product; a linaria hash is an artefact of the build and changes
   without anybody deciding that it should. `escTourSteps.test.ts` fails if an anchor ever
@@ -336,8 +339,8 @@ differently from the two server patches above:
 - `esc/new/**` costs nothing at sync time: upstream has never seen those paths, so there is
   nothing to reconcile. Keeping the tour's own code there, and the overlay down to one file, is
   the entire reason this category is survivable.
-- **No new npm dependency, ever.** `package.json` and `yarn.lock` are not allowlisted by
-  `verify.sh`'s fork-scope check; a tour library would put a permanent divergence in both.
+- **No new npm dependency, ever.** A tour library would put a permanent divergence in
+  `package.json` and `yarn.lock`.
 
 ### State
 
@@ -394,6 +397,19 @@ image is how the two Node versions above happened.
 
 ---
 
+## Category 5: nodemailer 10 SMTP type compatibility
+
+The root resolutions require nodemailer 10.2.1 or a later 10.x release. The
+upstream SMTP driver and SMTP client provider import types from
+`nodemailer/lib/smtp-connection`. Their copies in `esc/overlay/` import
+`nodemailer/lib/smtp-transport` for nodemailer 10 compatibility.
+
+On an upstream sync, re-copy the SMTP driver and SMTP client provider listed in
+`scripts/esc-modified-files.txt` and reapply the type changes.
+`scripts/verify-esc-features.sh` checks both files in the applied tree.
+
+---
+
 ## Licensing / legal (AGPLv3)
 
 - Twenty is **AGPLv3**. Modifying it and self-hosting is permitted; AGPL §13 only
@@ -432,7 +448,7 @@ Do **not** touch the separate `twenty-rc` (v1.17) stack on CT 175 — only `twen
 
 ## File index
 
-- `esc/overlay/` — patched upstream files (mirror upstream paths). Currently THREE files;
+- `esc/overlay/` — patched upstream files (mirror upstream paths). Currently six files;
   `scripts/esc-modified-files.txt` is the flat list and must match this directory exactly.
 - `esc/esc-apply.sh` — overlay installer / re-apply-after-upgrade.
 - `scripts/verify-esc-features.sh` — post-apply verification.

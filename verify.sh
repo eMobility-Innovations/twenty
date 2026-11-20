@@ -206,6 +206,74 @@ else
   echo "esc-tour: the tour suite passed and the tree was restored."
 fi
 
+echo "gate: security dependency floors must hold"
+python3 - <<'PYTHON'
+import json
+import re
+from pathlib import Path
+
+floors = {
+    "nodemailer": (10, 2, 1),
+    "tar": (7, 5, 23),
+    "handlebars": (4, 7, 10),
+    "protobufjs": (7, 6, 6),
+    "proxy-addr": (2, 0, 8),
+}
+stable_version = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+
+
+def fail(message):
+    raise SystemExit(f"dependency-floors: {message}")
+
+
+resolutions = json.loads(Path("package.json").read_text())["resolutions"]
+nodemailer = re.fullmatch(rf">={stable_version} <11\.0\.0", resolutions.get("nodemailer", ""))
+if not nodemailer or not floors["nodemailer"] <= tuple(map(int, nodemailer.groups())) < (11, 0, 0):
+    fail("package.json resolutions.nodemailer must keep >=10.2.1 <11.0.0 or a higher 10.x floor")
+for parent in ("@mapbox/node-pre-gyp", "cacache", "node-gyp"):
+    key = f"{parent}/tar"
+    if resolutions.get(key) != "^7.5.23":
+        fail(f"package.json resolutions.{key} must be ^7.5.23")
+
+# Each Yarn lock has quoted, top-level npm descriptor lists and indented fields.
+# Exempt only the existing legacy selectors, independently of their resolved versions.
+legacy = {
+    "handlebars": {"4.7.8"},
+    "tar": {"^6.0.5", "^6.1.0", "^6.1.11", "^6.1.15", "^6.2.1"},
+}
+def check_lock(path, floors, legacy):
+    blocks = re.split(r"(?m)^(?=\S)", path.read_text())
+    seen = set()
+    for block in blocks:
+        header, _, fields = block.partition("\n")
+        for descriptor in header.removesuffix(":").strip('"').split(", "):
+            name, _, selector = descriptor.partition("@npm:")
+            if name not in floors or not selector or selector in legacy.get(name, ()):
+                continue
+            version = re.search(r"(?m)^  version: ([^\n]+)$", fields)
+            match = re.fullmatch(stable_version, version[1]) if version else None
+            if not match or tuple(map(int, match.groups())) < floors[name]:
+                floor = ".".join(map(str, floors[name]))
+                fail(f"{path} {descriptor} must resolve to a stable version >= {floor}")
+            if not re.search(rf'(?m)^  resolution: "{re.escape(name)}@npm:{re.escape(version[1])}"$', fields):
+                fail(f"{path} {descriptor} has a resolution inconsistent with version {version[1]}")
+            seen.add(name)
+
+    if missing := floors.keys() - seen:
+        fail(f"{path} is missing protected entries for {', '.join(sorted(missing))}")
+
+server = Path("packages/twenty-server")
+seed = server / "src/engine/core-modules/application/application-package/constants/seed-dependencies"
+check_lock(Path("yarn.lock"), floors, legacy)
+for manifest in (server / "package.json", seed / "package.json"):
+    dependencies = json.loads(manifest.read_text())["dependencies"]
+    nodemailer = re.fullmatch(rf">={stable_version} <11\.0\.0", dependencies.get("nodemailer", ""))
+    if not nodemailer or not floors["nodemailer"] <= tuple(map(int, nodemailer.groups())) < (11, 0, 0):
+        fail(f"{manifest} dependencies.nodemailer must keep >=10.2.1 <11.0.0 or a higher 10.x floor")
+check_lock(seed / "yarn.lock", {name: floors[name] for name in ("nodemailer", "tar")}, {})
+print("dependency-floors: root, server and seed manifest and lockfile security floors hold.")
+PYTHON
+
 echo "gate: org-specific application changes must have targeted checks"
 
 # ---------------------------------------------------------------------------
@@ -378,6 +446,12 @@ if [ -n "${DIFF_RANGE:-}" ]; then
 # UNRELATED edit to one of those three files no longer trips this check — the
 # typecheck above is what covers them instead.
 # ---------------------------------------------------------------------------
+# Added 2026-11-20: .openapi-policy.toml holds gate policy (waiver records),
+# like REPO-CONTRACT.toml. todo/*.md holds records, like docs/handovers/*.md.
+# The root and server manifests, root lockfile, seed manifest and seed lockfile
+# are checked by the dependency-floors gate above, which needs no node_modules
+# and therefore answers on the runner.
+# ---------------------------------------------------------------------------
 # Measured across all 30 gated repos on 2026-08-25, this bites exactly three of them: the
 # 22 others with a checkout carry no path allowlist at all, and the three that do
 # (docuseal-full, chatwoot, twenty) are all vendored upstream forks. All three were widened
@@ -387,7 +461,7 @@ unexpected="$({
   git diff --name-only
   git diff --cached --name-only
   git ls-files --others --exclude-standard
-} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push(\.vendored|\.local)?|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|docs/preflight/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|\.gitignore|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/2-0/2-0-instance-command-fast-[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/instance-commands\.constant\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts)$' || true)"
+} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push(\.vendored|\.local)?|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|docs/preflight/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|\.gitignore|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/2-0/2-0-instance-command-fast-[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/instance-commands\.constant\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts|\.openapi-policy\.toml|todo/.*\.md|package\.json|yarn\.lock|packages/twenty-server/package\.json|packages/twenty-server/src/engine/core-modules/application/application-package/constants/seed-dependencies/package\.json|packages/twenty-server/src/engine/core-modules/application/application-package/constants/seed-dependencies/yarn\.lock)$' || true)"
 
 if [ -n "$unexpected" ]; then
   {
