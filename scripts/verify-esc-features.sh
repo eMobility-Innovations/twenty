@@ -298,6 +298,24 @@ else
 fi
 
 echo ""
+echo "5. nodemailer 10 SMTP type compatibility"
+
+for SMTP_FILE in \
+    "${APP_DIR}/packages/twenty-server/src/engine/core-modules/email/drivers/smtp.driver.ts" \
+    "${APP_DIR}/packages/twenty-server/src/modules/messaging/message-import-manager/drivers/smtp/providers/smtp-client.provider.ts"; do
+    SMTP_NAME="${SMTP_FILE##*/}"
+    if [ ! -f "${SMTP_FILE}" ]; then
+        check_fail "${SMTP_NAME} not found at expected path (update esc/overlay/ and PATCH_MANIFEST.md if upstream moved it)"
+    elif grep -Fq 'nodemailer/lib/smtp-connection' "${SMTP_FILE}"; then
+        check_fail "${SMTP_NAME} still uses nodemailer/lib/smtp-connection — nodemailer 10 overlay NOT applied"
+    elif grep -Fq 'nodemailer/lib/smtp-transport' "${SMTP_FILE}"; then
+        check_pass "${SMTP_NAME} uses nodemailer/lib/smtp-transport"
+    else
+        check_fail "${SMTP_NAME} is missing nodemailer/lib/smtp-transport — nodemailer 10 compatibility NOT verified"
+    fi
+done
+
+echo ""
 echo -e "${BOLD}Summary:${NC} ${GREEN}${PASS} passed${NC}, ${RED}${FAIL} failed${NC}, ${YELLOW}${WARN} warnings${NC}"
 echo ""
 

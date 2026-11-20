@@ -62,6 +62,10 @@ so they are kept as patched copies at their upstream paths under `esc/overlay/`,
 checkout by `esc/esc-apply.sh` before an image is built. `scripts/PATCH_MANIFEST.md` documents
 each patch and how to re-point it when upstream moves the code.
 
+The `dependency-floors` gate covers nodemailer across the root, server and seed manifests
+and the root and seed lockfiles. The SMTP type compatibility patch lives under
+`esc/overlay/` and is documented in Category 5 of `scripts/PATCH_MANIFEST.md`.
+
 Landed on the trunk 2026-09-21. Until then it lived only on unmerged branches while the patched
 image ran in production — the image CT175 runs was not reproducible from anything on the trunk.
 

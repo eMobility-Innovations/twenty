@@ -15,6 +15,8 @@ IP_REL=packages/twenty-server/src/engine/core-modules/secure-http-client/utils/i
 DOCKERFILE_REL=packages/twenty-docker/twenty/Dockerfile
 NAV_REL=packages/twenty-front/src/modules/navigation/components/NavigationDrawerOtherSection.tsx
 TOUR_REL=packages/twenty-front/src/modules/esc-tour
+SMTP_CLIENT_REL=packages/twenty-server/src/modules/messaging/message-import-manager/drivers/smtp/providers/smtp-client.provider.ts
+SMTP_DRIVER_REL=packages/twenty-server/src/engine/core-modules/email/drivers/smtp.driver.ts
 
 # A fixture APP_DIR whose files are the OVERLAY's, i.e. a correctly applied tree.
 # verify-esc-features.sh derives APP_DIR from its own location, so the script is copied
@@ -41,6 +43,11 @@ make_applied_tree() {
   # with what they are testing — which is exactly what happened when Category 3 landed.
   cp "${REPO_DIR}/esc/overlay/${NAV_REL}" "${root}/${NAV_REL}"
   cp -R "${REPO_DIR}/esc/new/${TOUR_REL}" "${root}/$(dirname "${TOUR_REL}")/"
+
+  for smtp_rel in "${SMTP_DRIVER_REL}" "${SMTP_CLIENT_REL}"; do
+    mkdir -p "${root}/$(dirname "${smtp_rel}")"
+    cp "${REPO_DIR}/esc/overlay/${smtp_rel}" "${root}/${smtp_rel}"
+  done
 
   printf '%s' "${root}"
 }
@@ -271,5 +278,18 @@ sed -i.bak "s/objectNamePlural: '[^']*'/objectNamePluralWasRemoved: 1/" \
 out="$(run_verifier "${tree}")"; rc=$?
 assert_exit 1 $rc && assert_contains "${out}" "would have nothing to check" && pass
 teardown_scratch
+
+printf '\n== nodemailer 10 SMTP type compatibility\n'
+
+for smtp_rel in "${SMTP_DRIVER_REL}" "${SMTP_CLIENT_REL}"; do
+  smtp_file="${smtp_rel##*/}"
+  begin "the upstream ${smtp_file} fails the nodemailer 10 check"
+  setup_scratch
+  tree="$(make_applied_tree)"
+  cp "${REPO_DIR}/${smtp_rel}" "${tree}/${smtp_rel}"
+  out="$(run_verifier "${tree}")"; rc=$?
+  assert_exit 1 $rc && assert_contains "${out}" "${smtp_file} still uses nodemailer/lib/smtp-connection" && pass
+  teardown_scratch
+done
 
 summary

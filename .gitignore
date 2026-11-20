@@ -33,6 +33,7 @@ storybook-static
 .oxlintcache
 .nyc_output
 test-results/
+__pycache__/
 dump.rdb
 .tinyb
 

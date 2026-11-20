@@ -73,7 +73,7 @@ CONTRACT_VERSION = "v1"
 # getting the old client, and `policy/vendored-artefacts.json` could not notice because
 # its `alert-client` entry was disabled for want of a version to compare and an upstream
 # to compare it with. Both are now declared. BUMP THIS on every change to this file.
-CLIENT_VERSION = "1.21.0"
+CLIENT_VERSION = "1.24.0"
 # THE NAME. Was `alert-relay.ha.fiszu.com` from 2026-08-12; changed 2026-08-18 because
 # that name CANNOT work from outside the LAN and never could. Public DNS sends `.ha` names
 # to Cloudflare, whose Universal SSL certificate covers `fiszu.com, *.fiszu.com` — ONE
@@ -529,6 +529,13 @@ _SPOOL_NAME = re.compile(r"^\d{20}-\d+\.json$")
 #: which is what lets a suite redirect it.
 _SPOOL_FALLBACK = "~/.claude/logs/alert-spool"
 
+#: A SPOOLED FIRE OLDER THAN THIS IS SUMMARISED, NOT REPLAYED (1.24.0). Measured 2026-11-11:
+#: a laptop whose relay key landed after weeks offline drained 2,181 spool files and the
+#: relay ledgered 4,568 `major` fires in 23 minutes, each a claim about a state from days
+#: earlier. Operator decision 2026-11-12 ("go with recs", option A, ~24 h). A producer whose
+#: condition is STILL true re-fires it on its own next tick, which is what sends the flush.
+STALE_REPLAY_AFTER_S = 86400
+
 
 def _usable_spool(spool_dir: str) -> str:
     """The spool a producer ASKED for, or one this host can actually WRITE.
@@ -685,7 +692,8 @@ class AlertClient:
              channel: str = "", username: str = "", mode: str = "",
              unearned: bool = False, notice: bool = False,
              record_only: bool = False,
-             next_reassert_by: float | None = None) -> dict:
+             next_reassert_by: float | None = None, shape: str | None = None,
+             max_backoff_seconds: int | None = None) -> dict:
         """Build, validate-and-FIX, deliver or spool. Never raises, never drops.
 
         `fingerprint` must be STABLE across occurrences — it is the identity every dedup,
@@ -703,10 +711,19 @@ class AlertClient:
         pulse is read by producer-silence, never by a human); on anything else it is
         ignored and the alert is delivered as always.
 
+        `shape="event"` marks a self-closing event pair: its clear must not cancel a
+        fire held by the relay flood ceiling. Omit it for state-shaped conditions.
+
         `next_reassert_by` (epoch seconds, a FIRE only) is this producer's promise: "if this
         is still true I will post it again by then". The relay judges the condition's silence
         against it, so a producer inside its own backoff gap is not auto-retired and re-paged
         as a fresh episode (find 2026-11-01). Omit it unless you will really re-assert by then.
+
+        `max_backoff_seconds` (a FIRE only) caps the relay's re-post ladder for this condition:
+        "never hold my re-posts longer than this". It can only LOWER the 24h ceiling, and the
+        relay floors it at the severity's base window, so passing that window (3600 for major)
+        means "cap at the first backoff step". For conditions a human must see on every
+        recurrence, such as HA quorum or failover; omit it everywhere else.
 
         `mode` IS IN THIS SIGNATURE BECAUSE IT WAS NOT, AND THAT DROPPED ALERTS. `_build`
         has read `kw.get("mode")` since 1.6.0, but this method — which `fire()` and
@@ -724,7 +741,8 @@ class AlertClient:
                              immediate_escalation=immediate_escalation,
                              channel=channel, username=username, mode=mode,
                              unearned=unearned, notice=notice,
-                             record_only=record_only, next_reassert_by=next_reassert_by)
+                             record_only=record_only, next_reassert_by=next_reassert_by,
+                             shape=shape, max_backoff_seconds=max_backoff_seconds)
         self.flush_spool()
         return self._deliver(payload)
 
@@ -878,6 +896,10 @@ class AlertClient:
         except OSError:
             return 0
         names = self._collapse_spooled_pairs(spool, names)
+        names, summarised = self._summarise_stale_fires(spool, names)
+        if summarised is False:
+            return 0                        # summary not delivered; everything is kept
+        sent += summarised
         for name in names:
             path = os.path.join(spool, name)
             try:
@@ -896,6 +918,73 @@ class AlertClient:
             else:
                 break                       # still down; stop hammering, keep the order
         return sent
+
+    def _summarise_stale_fires(self, spool: str, names: list):
+        """Replace spooled FIRES older than STALE_REPLAY_AFTER_S with ONE routine notice.
+
+        Returns (names still to replay, 1 if a summary was sent, 0 if nothing was stale, or
+        False if the summary could not be delivered, in which case NOTHING was removed).
+        A CLEAR is never summarised: the relay may hold the fire it closes. Each stale
+        payload is appended to `stale-summarised.jsonl` (not a `_SPOOL_NAME`, so never
+        replayed) BEFORE its file is removed: record or nothing.
+        """
+        cutoff_us = (time.time() - STALE_REPLAY_AFTER_S) * 1e6
+        stale, keep = [], []
+        for name in names:
+            payload = self._read_spooled(spool, name) if int(name[:20]) < cutoff_us else None
+            is_fire = (isinstance(payload, dict)
+                       and (_text(payload.get("state")).lower() or STATE_FIRE) == STATE_FIRE)
+            (stale if is_fire else keep).append((name, payload) if is_fire else name)
+        if not stale:
+            return names, 0
+        if not self._post(self._stale_summary(spool, stale)):
+            return names, False
+        if not self._record_stale(spool, stale):
+            return keep, 1                  # summary sent; files kept, replay skips them
+        for name, _ in stale:
+            self._unlink_spooled(spool, name)
+        return keep, 1
+
+    @staticmethod
+    def _read_spooled(spool: str, name: str):
+        try:
+            with open(os.path.join(spool, name), encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            return None
+
+    def _stale_summary(self, spool: str, stale: list) -> dict:
+        counts: dict = {}
+        for _, p in stale:
+            key = f"{_text(p.get('service')) or '?'}: {_text(p.get('title')) or '?'}"
+            counts[key] = counts.get(key, 0) + 1
+        top = sorted(counts.items(), key=lambda kv: -kv[1])[:10]
+        first, last = (time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(int(n[:20]) / 1e6))
+                       for n in (stale[0][0], stale[-1][0]))
+        body = (f"Spooled {first}..{last} while the relay was unreachable, older than "
+                f"{STALE_REPLAY_AFTER_S // 3600} h, so NOT replayed as current fires. "
+                f"Still-true conditions re-fire on their producer's next tick. Full "
+                f"payloads: {spool}/stale-summarised.jsonl\n"
+                + "\n".join(f"- {k} x{v}" for k, v in top))
+        return self._build(entity=_text(stale[0][1].get("entity")) or self.service,
+                           fingerprint=f"{self.service}:stale-spool-summary",
+                           title=f"{len(stale)} stale spooled alert(s) summarised, not replayed",
+                           body=body, state=STATE_FIRE, severity="routine", notice=True)
+
+    @staticmethod
+    def _record_stale(spool: str, stale: list) -> bool:
+        entry = {"summarised_at": time.time(), "fires": [p for _, p in stale],
+                 "files": [n for n, _ in stale]}
+        try:
+            with open(os.path.join(spool, "stale-summarised.jsonl"), "a",
+                      encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+        except OSError as exc:
+            _log(f"could not record summarised stale fires ({exc}) — files kept")
+            return False
+        return True
 
     def spool_depth(self) -> int:
         """How many of OUR alerts are waiting. Counted with the same pattern `flush_spool`
@@ -944,6 +1033,8 @@ class AlertClient:
             "runbook": runbook,
             "channel": _text(kw.get("channel")) or self.channel,
         }
+        if kw.get("shape") == "event":
+            payload["shape"] = "event"
         # OMITTED WHEN UNSET, never sent as "". The relay reads `raw.get("username") or
         # service`, so an empty string would fall through to the same default — but an
         # absent key and an empty one are different claims, and every existing producer
@@ -977,6 +1068,13 @@ class AlertClient:
         declared = _declared_iso(kw.get("next_reassert_by")) if state == STATE_FIRE else ""
         if declared:
             payload["next_reassert_by"] = declared
+        # ------------------------------------------------- the producer's ladder ceiling
+        # OMITTED WHEN UNSET or meaningless (a clear, a bool, a non-positive value), so every
+        # producer that does not declare sends byte-for-byte what it sent before.
+        ceiling = kw.get("max_backoff_seconds")
+        if (state == STATE_FIRE and isinstance(ceiling, int) and not isinstance(ceiling, bool)
+                and ceiling > 0):
+            payload["max_backoff_seconds"] = ceiling
         # ---------------------------------------------------------------- delivery mode
         # STATE IT. `mode="relay"` posts this alert on its own, immediately;
         # `mode="summary"` lets the relay bundle it with whatever else is due for the
