@@ -1,7 +1,7 @@
 name: twenty-esc-supplier
 services:
   server:
-    image: twentycrm/twenty:${TAG:?TAG must be set in .env}
+    image: twenty-esc-supplier-sso:${TAG:?TAG must be set in .env}
     volumes:
       - server-local-data:/app/packages/twenty-server/.local-storage
     ports:
@@ -16,6 +16,9 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env (Twenty >= 2.5)}
       ENTERPRISE_KEY: self-hosted-esc-supplier
       IS_BILLING_ENABLED: "false"
+      # auth.fiszu.com resolves to the internal edge (192.168.103.191) from CT175; without this
+      # Twenty's SSRF guard refuses the Keycloak OIDC issuer. Exact hostname, nothing else.
+      OUTBOUND_HTTP_ALLOWED_INTERNAL_HOSTS: auth.fiszu.com
       EMAIL_DRIVER: smtp
       EMAIL_SMTP_HOST: email-proxy.ha-nonhttp.fiszu.com
       EMAIL_SMTP_PORT: 25
@@ -33,7 +36,7 @@ services:
       retries: 10
     restart: always
   worker:
-    image: twentycrm/twenty:${TAG:?TAG must be set in .env}
+    image: twenty-esc-supplier-sso:${TAG:?TAG must be set in .env}
     volumes:
       - server-local-data:/app/packages/twenty-server/.local-storage
     command: ["yarn", "worker:prod"]
@@ -46,6 +49,9 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env (Twenty >= 2.5)}
       ENTERPRISE_KEY: self-hosted-esc-supplier
       IS_BILLING_ENABLED: "false"
+      # auth.fiszu.com resolves to the internal edge (192.168.103.191) from CT175; without this
+      # Twenty's SSRF guard refuses the Keycloak OIDC issuer. Exact hostname, nothing else.
+      OUTBOUND_HTTP_ALLOWED_INTERNAL_HOSTS: auth.fiszu.com
       DISABLE_DB_MIGRATIONS: "true"
       DISABLE_CRON_JOBS_REGISTRATION: "true"
     depends_on:
