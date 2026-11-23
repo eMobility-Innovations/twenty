@@ -206,6 +206,10 @@ else
   echo "esc-tour: the tour suite passed and the tree was restored."
 fi
 
+echo "gate: the supplier hub app must stay pinned, identified and buildable"
+bash esc/esc-supplier/app/tests/check-app.test.sh
+bash esc/esc-supplier/app/check-app.sh
+
 echo "gate: security dependency floors must hold"
 python3 - <<'PYTHON'
 import json
