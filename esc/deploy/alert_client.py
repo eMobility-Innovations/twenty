@@ -56,6 +56,7 @@ in two places that can actually see it: at commit time by
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -73,7 +74,7 @@ CONTRACT_VERSION = "v1"
 # getting the old client, and `policy/vendored-artefacts.json` could not notice because
 # its `alert-client` entry was disabled for want of a version to compare and an upstream
 # to compare it with. Both are now declared. BUMP THIS on every change to this file.
-CLIENT_VERSION = "1.24.0"
+CLIENT_VERSION = "1.25.0"
 # THE NAME. Was `alert-relay.ha.fiszu.com` from 2026-08-12; changed 2026-08-18 because
 # that name CANNOT work from outside the LAN and never could. Public DNS sends `.ha` names
 # to Cloudflare, whose Universal SSL certificate covers `fiszu.com, *.fiszu.com` — ONE
@@ -536,6 +537,68 @@ _SPOOL_FALLBACK = "~/.claude/logs/alert-spool"
 #: condition is STILL true re-fires it on its own next tick, which is what sends the flush.
 STALE_REPLAY_AFTER_S = 86400
 
+#: THE SPOOL INDEX (1.25.0) — every spool directory this client has WRITTEN to, so ONE
+#: per-host drainer (`drain_indexed_spools`, run by `fleet-alert-spool-drain.timer`) can
+#: replay it without waiting for the producer's own next send.
+#:
+#: WHY. Until 1.25.0 a spool drained only inside the producer's next `send()`. For an
+#: EVENT-driven producer that is the next event, not the next minute: on 2026-11-22 20:58Z
+#: CT113041's mg-auto-deploy spooled a CLEAR during a 0.9 s relay restart, and its next send
+#: was the next Tue/Wed/Thu timer run — 31 h later; a PROD rollback-failed FIRE could have
+#: waited ~4 days. Operator decision D44(6) (2026-11-23): fix it at the client, one drainer
+#: per host. Measured in IKB projects/2026-11-19_estate-repair/claims/
+#: relay-rungs-ct113041-2026-11-22.md.
+#:
+#: One small JSON file per spool directory, named by the directory's hash, so recording is
+#: idempotent and two producers never contend for one file. Read at CALL time so a suite can
+#: redirect it; `off` disables recording. A host where the index cannot be written loses
+#: NOTHING: the producer's own next send still replays the spool, exactly as before 1.25.0.
+SPOOL_INDEX_DEFAULT = "/var/lib/fleet-alert-spool-index"
+
+
+def spool_index_dir() -> str:
+    """Where spool directories are recorded: `FLEET_ALERT_SPOOL_INDEX`, else the default.
+
+    UNDER A TEST RUNNER THE DEFAULT IS `off`. Suites run ON live nodes, and an indexed tmp
+    spool is one the real drainer would replay into production on its next tick — the
+    `test_the_suite_never_writes_to_the_alert_spool` scar by a second road. A suite that
+    tests the index names its own directory."""
+    explicit = os.environ.get("FLEET_ALERT_SPOOL_INDEX")
+    if explicit is not None:
+        return explicit
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return "off"
+    return SPOOL_INDEX_DEFAULT
+
+
+def _index_spool(spool: str, owner_repo: str, service: str) -> bool:
+    """Record `spool` in the index. Never raises — this runs on the alerting path."""
+    index = spool_index_dir()
+    if not index or index == "off" or not spool:
+        return False
+    spool = os.path.abspath(spool)
+    name = hashlib.sha256(spool.encode("utf-8")).hexdigest()[:24] + ".json"
+    path = os.path.join(index, name)
+    entry = {"spool": spool, "owner_repo": owner_repo, "service": service}
+    try:
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                if json.load(fh).get("spool") == spool:
+                    return True
+    except (OSError, ValueError):
+        pass
+    try:
+        os.makedirs(index, exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry))
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        _log(f"could not record spool {spool} in the drain index {index} ({exc}); it "
+             f"still replays on this producer's next send")
+        return False
+
 
 def _usable_spool(spool_dir: str) -> str:
     """The spool a producer ASKED for, or one this host can actually WRITE.
@@ -625,6 +688,10 @@ class AlertClient:
         # alt it was given; that behaviour predates this and is not this fix's to move.
         # Only the DEFAULTED alt is dropped, so a caller naming an alt explicitly still
         # gets it — an operator who says "here, and here if that fails" is obeyed too.
+        # A PINNED producer's spool is never indexed: the per-host drainer replays on the
+        # DEFAULT chain, so it would carry an alert meant for an operator-named sink past
+        # that sink into production. Its own next send still replays it, to its own pin.
+        self._pinned = pinned
         if not url and pinned and alt_url == DEFAULT_ALT_URL:
             alt_url = ""
         # Skipped when it is the same place — a caller that pinned the address explicitly
@@ -890,6 +957,20 @@ class AlertClient:
         spool = self._spool_read_dir()
         if not spool or not os.path.isdir(spool):
             return 0
+        # ONE DRAINER AT A TIME PER SPOOL (1.25.0). The producer and the per-host drainer
+        # can now reach the same directory in the same second; without this both post the
+        # oldest file. Non-blocking: whoever holds it is already delivering. The lock file
+        # does not match `_SPOOL_NAME`, so it is never posted and never deleted.
+        lock = _try_lock(spool)
+        if lock is False:
+            return 0
+        try:
+            return self._flush_locked(spool)
+        finally:
+            if lock is not None:
+                os.close(lock)
+
+    def _flush_locked(self, spool: str) -> int:
         sent = 0
         try:
             names = sorted(n for n in os.listdir(spool) if _SPOOL_NAME.match(n))
@@ -1367,11 +1448,98 @@ class AlertClient:
         except OSError as exc:
             _log(f"could not spool ({exc}) — THIS ALERT IS LOST")
             return False
+        if not self._pinned:
+            _index_spool(spool, self.owner_repo, self.service)
         depth = self.spool_depth()
         if depth >= SPOOL_WARN_DEPTH:
             _log(f"spool depth is {depth} — the relay has been unreachable for a long "
                  f"time. Nothing has been discarded; this is a fault to investigate.")
         return True
+
+
+def _try_lock(spool: str):
+    """An fd holding `<spool>/.drain.lock`, None if locking is unavailable, False if busy."""
+    try:
+        import fcntl
+    except ImportError:                 # pragma: no cover — not POSIX
+        return None
+    try:
+        fd = os.open(os.path.join(spool, ".drain.lock"), os.O_RDWR | os.O_CREAT, 0o666)
+    except OSError:
+        return None                     # read-only spool: drain unlocked, as before 1.25.0
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:             # EWOULDBLOCK/EAGAIN: someone is draining it now
+        os.close(fd)
+        return False
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
+# ── the per-host drainer (1.25.0, operator D44(6)) ────────────────────────────────────────
+#
+# Replays every spool the index names, from OUTSIDE the producer, on the drainer's own
+# default rung chain. `root` lets a Proxmox node drain its containers' spools by reading
+# their rootfs — the index holds paths as the container sees them. The payload in each
+# spool file is complete (owner, service, entity, fingerprint), so the alert the relay
+# ledgers is the producer's own; only the delivering process differs.
+def indexed_spools(root: str = "/") -> list:
+    """[(spool dir under `root`, entry)] for every readable index entry, sorted by path."""
+    index = spool_index_dir()
+    if not index or index == "off":
+        return []
+    base = os.path.join(root, index.lstrip("/"))
+    try:
+        names = sorted(n for n in os.listdir(base) if n.endswith(".json"))
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        try:
+            with open(os.path.join(base, name), encoding="utf-8") as fh:
+                entry = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        spool = entry.get("spool") if isinstance(entry, dict) else None
+        if isinstance(spool, str) and spool.startswith("/"):
+            out.append((os.path.join(root, spool.lstrip("/")), entry))
+    return sorted(out, key=lambda pair: pair[0])
+
+
+def oldest_spooled_age(spool: str, now: float | None = None) -> float | None:
+    """Seconds since the oldest replayable file in `spool` was written; None if empty."""
+    try:
+        names = sorted(n for n in os.listdir(spool) if _SPOOL_NAME.match(n))
+    except OSError:
+        return None
+    if not names:
+        return None
+    written = int(names[0].split("-", 1)[0]) / 1e6
+    return max(0.0, (time.time() if now is None else now) - written)
+
+
+def drain_indexed_spools(root: str = "/", opener=None, now: float | None = None) -> list:
+    """Replay every indexed spool under `root`. One dict per spool, never raises:
+    {"spool", "owner_repo", "service", "replayed", "left", "oldest_left_s"}."""
+    results = []
+    for spool, entry in indexed_spools(root):
+        if not os.path.isdir(spool):
+            continue
+        client = AlertClient(owner_repo=_text(entry.get("owner_repo")) or "unknown",
+                             service=_text(entry.get("service")) or "unknown",
+                             spool_dir=spool, opener=opener)
+        try:
+            replayed = client.flush_spool()
+        except Exception as exc:        # noqa: BLE001 — one bad spool never stops the rest
+            _log(f"drain of {spool} failed: {exc!r}")
+            replayed = 0
+        results.append({"spool": spool, "owner_repo": client.owner_repo,
+                        "service": client.service, "replayed": replayed,
+                        "left": client.spool_depth(),
+                        "oldest_left_s": oldest_spooled_age(spool, now)})
+    return results
 
 
 # ── the door for producers that are not Python ────────────────────────────────────────
@@ -1415,6 +1583,14 @@ def _cli(argv=None) -> int:
     if "--print-pinned-host" in argv:
         sys.stdout.write(pinned_host() + "\n")
         return 0
+    # `--drain-spools [ROOT]`: the per-host drainer's door, for a host with no fleet checkout.
+    if "--drain-spools" in argv:
+        at = argv.index("--drain-spools")
+        root = argv[at + 1] if len(argv) > at + 1 else "/"
+        results = drain_indexed_spools(root)
+        for row in results:
+            sys.stdout.write(json.dumps(row, sort_keys=True) + "\n")
+        return 1 if any(r["left"] for r in results) else 0
 
     p = argparse.ArgumentParser(
         prog="alert_client.py",
