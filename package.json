@@ -188,7 +188,8 @@
     "@wyw-in-js/transform@npm:0.7.0": "patch:@wyw-in-js/transform@npm%3A0.7.0#~/.yarn/patches/@wyw-in-js-transform-npm-0.7.0-ba641dc99f.patch",
     "@mapbox/node-pre-gyp/tar": "^7.5.23",
     "cacache/tar": "^7.5.23",
-    "node-gyp/tar": "^7.5.23"
+    "node-gyp/tar": "^7.5.23",
+    "postcss": "^8.5.31"
   },
   "version": "0.2.1",
   "nx": {},
