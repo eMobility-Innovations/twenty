@@ -47,9 +47,11 @@ The Keycloak client secret lives only in Keycloak and in Twenty's
 `python3 -m kc_manifest --apply --rotate-secret twenty-esc-supplier --secret-out <0600 file>`, then
 set that row's `clientSecret` to it.
 
-## Supplier hub data model (`app/`)
+## Supplier CRM data model (`apps/`)
 
-The supplier workspace's objects, fields, views and roles are code: a Twenty App in
-[`app/`](app/README.md), applied with `yarn twenty app plan` / `apply`. Nothing is built by hand
-in Settings. Logic and data feeds live in `twenty-ingest` (`src/supplier/`). When this stack is
-upgraded, bump the app's `twenty*` pins to the new minor in the same series (RM #27871).
+The supplier workspace's objects, fields, views and roles are code: one Twenty App per module in
+[`apps/`](apps/), the core app in [`apps/core/`](apps/core/README.md), applied with
+`yarn twenty app plan` / `apply`. Nothing is built by hand in Settings. Logic and data feeds live
+in `twenty-ingest` (`src/supplier/`). **The module contract — what a module is, how it is added
+and removed, naming, tests, PRs — is [`AGENTS.md`](AGENTS.md).** When this stack is upgraded,
+bump every app's `twenty*` pins to the new minor in the same series (RM #27871).

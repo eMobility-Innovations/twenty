@@ -1,9 +1,10 @@
-# ESC Supplier Hub — the supplier data model as code
+# ESC Supplier Hub — the core app of the supplier CRM
 
-A [Twenty App](https://docs.twenty.com/developers/extend/apps/getting-started/quick-start)
-holding the supplier hub's data model: objects, fields, relations, views and roles. It is
+The **core** [Twenty App](https://docs.twenty.com/developers/extend/apps/getting-started/quick-start)
+of the supplier CRM: the supplier record and what every module needs. Modules are their own
+apps next to it in `../<module>/`; the module contract is [`../../AGENTS.md`](../../AGENTS.md). It is
 deployed to the **ESC Supplier** workspace at https://esc-supplier.crm.fiszu.com (the
-`twenty-esc-supplier` stack on CT175, see `../README.md`). Redmine: umbrella #27542, layout
+`twenty-esc-supplier` stack on CT175, see `../../README.md`). Redmine: umbrella #27542, layout
 #27871.
 
 Nothing in the supplier workspace's data model is built by hand in Settings: a change is a
@@ -14,17 +15,18 @@ instance be rebuilt from this directory.
 
 | Change | Where |
 |---|---|
-| Object, field, relation, view, navigation item, role | `src/` here, one `define*` file per entity |
+| Supplier record and what every module needs | `src/` here, one `define*` file per entity |
+| A concern of its own (forms, credit, …) | a module app, `../<module>/` — never here |
 | Logic that reads other systems (Archives, PIM, Redmine, BaseLinker), reminders, scores | `twenty-ingest`, module `src/supplier/` — not here |
-| Supplier stack deploy (image, compose, upgrades) | `../` (`esc/esc-supplier/`) |
+| Supplier stack deploy (image, compose, upgrades) | `../../` (`esc/esc-supplier/`) |
 | ESC or RC CRM | never from here |
 
-Build rules for the supplier hub: `twenty-ingest/docs/supplier/BUILD-RULES.md`.
+Build rules for the supplier CRM: [`../../AGENTS.md`](../../AGENTS.md).
 
 ## Versions
 
 `twenty`, `twenty-sdk` and `twenty-client-sdk` are pinned to the server's minor version
-(server v2.60.3 → `2.60.0`). When the supplier stack is upgraded (`../upgrade.sh`), bump
+(server v2.60.3 → `2.60.0`). When the supplier stack is upgraded (`../../upgrade.sh`), bump
 these pins in the same PR series and re-run `plan`.
 
 ## Working on it
@@ -32,7 +34,7 @@ these pins in the same PR series and re-run `plan`.
 Node 24.5+ or 26.5.1+, Yarn 4 (`npx corepack yarn …` where Corepack is not installed).
 
     yarn install
-    yarn typecheck && yarn test && yarn twenty app build   # what ./verify.sh runs
+    yarn typecheck && yarn test && yarn twenty app build   # what ./verify.sh runs (check-apps.sh)
 
 ### Applying to the supplier workspace — run it FROM CT175
 
@@ -64,6 +66,6 @@ which nobody uses yet (Karol, 2026-11-23). A test instance is requested when V1 
 ## What this template had and why it is gone
 
 `twenty app init` (2.60.0) also wrote GitHub Actions workflows (Actions are off for the
-org; the repo's gate is `../../../verify.sh`), an example front component, page layout,
+org; the repo's gate is `../../../../verify.sh`), an example front component, page layout,
 navigation item and logic function, and integration tests that need a local dev server with
 a seeded API key. None of them is part of the supplier hub.

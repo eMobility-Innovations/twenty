@@ -207,8 +207,8 @@ else
 fi
 
 echo "gate: the supplier hub app must stay pinned, identified and buildable"
-bash esc/esc-supplier/app/tests/check-app.test.sh
-bash esc/esc-supplier/app/check-app.sh
+bash esc/esc-supplier/tests/check-apps.test.sh
+bash esc/esc-supplier/check-apps.sh
 
 echo "gate: security dependency floors must hold"
 python3 - <<'PYTHON'
