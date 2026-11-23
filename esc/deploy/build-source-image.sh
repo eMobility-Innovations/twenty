@@ -75,9 +75,11 @@ if ! printf '%s' "$APP_VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-
   exit 1
 fi
 
+IMAGE_REVISION="$(git rev-parse HEAD 2>/dev/null || true)"
+
 echo "==> Building ${IMAGE_TAG}"
 echo "    repo        : ${REPO_ROOT}"
-echo "    commit      : $(git rev-parse HEAD)"
+echo "    commit      : ${IMAGE_REVISION}"
 echo "    branch      : $(git rev-parse --abbrev-ref HEAD)"
 echo "    APP_VERSION : ${APP_VERSION}"
 
@@ -106,6 +108,10 @@ DOCKER_BUILDKIT=0 docker build \
   "${MEMORY_ARGS[@]}" \
   --target twenty \
   -f packages/twenty-docker/twenty/Dockerfile \
+  --label "org.opencontainers.image.source=https://github.com/eMobility-Innovations/twenty" \
+  --label "org.opencontainers.image.url=https://github.com/twentyhq/twenty" \
+  --label "org.opencontainers.image.version=${APP_VERSION#v}" \
+  --label "org.opencontainers.image.revision=${IMAGE_REVISION}" \
   --build-arg "APP_VERSION=${APP_VERSION}" \
   --build-arg "REACT_APP_SERVER_BASE_URL=${SERVER_BASE_URL}" \
   -t "${IMAGE_TAG}" \

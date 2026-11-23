@@ -27,6 +27,7 @@ test-boot-smoke.sh
 test-provision-tour-progress.sh
 test-tour-admin-scripts.sh
 test-app-version-guard.sh
+test-supplier-image-labels.sh
 test-image-watch.sh
 test-dependency-floor.sh
 "
