@@ -73,7 +73,7 @@ uninstall hook can), then delete `apps/<module>/` and `twenty-ingest/src/supplie
 | App display name | `ESC Supplier — <Title>` | `ESC Supplier — Forms` |
 | Object `nameSingular` | camelCase, unique across ALL apps (gate refuses a clash) | `supplierForm`, `supplierFormAnswer` |
 | Field a module adds to a core object | prefixed with the module's camelCase id | `formsAnswers` on `supplier` |
-| Ingest module | `twenty-ingest/src/supplier/<id>/`, flag `SUPPLIER_<ID>_ENABLED` | `SUPPLIER_FORMS_ENABLED` |
+| Ingest module | `twenty-ingest/src/supplier/<id>/`, switch `supplier.<id>.enabled` (config key, ships off) | `supplier.forms.enabled` |
 
 **Never change a `universalIdentifier`**: Twenty reads it as a delete plus a create, which drops
 the object's data. Every identifier is a UUID v4 in `src/constants/`, unique across all apps.
