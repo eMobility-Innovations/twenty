@@ -108,6 +108,28 @@ out="$("${SCRIPT}" "${repo}" 2>&1)"; rc=$?
 assert_exit 0 $rc && pass
 teardown_scratch
 
+# esc-apply.sh also copies esc/new/ (files upstream lacks) into the tree as UNTRACKED
+# files; a second build in the same checkout must account for them too.
+begin "esc/new files copied into the tree are accounted for"
+setup_scratch
+repo="$(make_repo)"; apply_overlay "${repo}"
+mkdir -p "${repo}/esc/new/packages/app/tour" && printf 'tour\n' > "${repo}/esc/new/packages/app/tour/Tour.tsx"
+git -C "${repo}" add -A && git -C "${repo}" commit -q -m new
+mkdir -p "${repo}/packages/app/tour" && cp "${repo}/esc/new/packages/app/tour/Tour.tsx" "${repo}/packages/app/tour/Tour.tsx"
+out="$("${SCRIPT}" "${repo}" 2>&1)"; rc=$?
+assert_exit 0 $rc && pass
+teardown_scratch
+
+begin "a stray file inside an untracked esc/new directory is still refused"
+setup_scratch
+repo="$(make_repo)"
+mkdir -p "${repo}/esc/new/packages/app/tour" && printf 'tour\n' > "${repo}/esc/new/packages/app/tour/Tour.tsx"
+git -C "${repo}" add -A && git -C "${repo}" commit -q -m new
+mkdir -p "${repo}/packages/app/tour" && printf 'stray\n' > "${repo}/packages/app/tour/Stray.tsx"
+out="$("${SCRIPT}" "${repo}" 2>&1)"; rc=$?
+assert_exit 1 $rc && assert_contains "${out}" "Stray.tsx" && pass
+teardown_scratch
+
 begin "a repo with no overlay directory is an error, not a pass"
 setup_scratch
 repo="$(make_repo)"

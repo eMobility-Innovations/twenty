@@ -28,11 +28,17 @@ if [ ! -d "${OVERLAY_DIR}" ]; then
 fi
 
 # Upstream-relative paths the overlay owns. A fourth overlay file needs no edit here.
-EXPECTED="$(cd "${OVERLAY_DIR}" && find . -type f | sed 's|^\./||' | sort)"
+# esc-apply.sh writes two trees into the checkout: esc/overlay (modified upstream files)
+# and esc/new (files upstream does not have, e.g. the esc-tour module). Both are its own
+# writes; leaving esc/new out made every SECOND build in one checkout refuse (2026-11-23).
+NEW_DIR="${REPO_ROOT}/esc/new"
+EXPECTED="$( { (cd "${OVERLAY_DIR}" && find . -type f)
+  if [ -d "${NEW_DIR}" ]; then (cd "${NEW_DIR}" && find . -type f); fi
+} | sed 's|^\./||' | sort -u)"
 
 # `awk '{print $NF}'` takes the path from a porcelain line. Renames print
 # "R  old -> new" and $NF is the new path, which is the one that matters here.
-DIRTY="$(cd "${REPO_ROOT}" && git status --porcelain | awk '{print $NF}' | sort)"
+DIRTY="$(cd "${REPO_ROOT}" && git status --porcelain --untracked-files=all | awk '{print $NF}' | sort)"
 
 UNEXPECTED="$(comm -23 <(printf '%s\n' "${DIRTY}") <(printf '%s\n' "${EXPECTED}") | grep -v '^$' || true)"
 
