@@ -27,6 +27,7 @@ const FLOORS = {
   '@nyariv/sandboxjs': '0.9.6', // GHSA-g8f2-4f4f-5jqw and nine earlier escapes
   'shell-quote': '1.8.4', // GHSA-w7jw-789q-3m8p
   'websocket-driver': '0.7.5', // GHSA-xv26-6w52-cph6
+  postcss: '8.5.12', // CVE-2026-45623 (deps4, PR #78)
 };
 
 // /app/node_modules is the tree this fork's yarn.lock owns. The base image's bundled npm

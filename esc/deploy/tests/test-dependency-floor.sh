@@ -19,6 +19,7 @@ good_tree() { # root
   pkg "$1/node_modules/@mapbox/node-pre-gyp" @mapbox/node-pre-gyp 1.0.11
   pkg "$1/node_modules/@mapbox/node-pre-gyp/node_modules/tar" tar 7.5.23
   pkg "$1/node_modules/axios/node_modules/form-data" form-data 4.0.5
+  pkg "$1/node_modules/postcss" postcss 8.5.33
 }
 
 probe() { ESC_FLOOR_ROOTS="$1/node_modules" node - < "${PROBE}" 2>&1; }
@@ -54,6 +55,14 @@ setup_scratch
 pkg "${SCRATCH}/app/node_modules/tar" tar 7.5.9
 out="$(probe "${SCRATCH}/app")"
 assert_contains "${out}" "tar@7.5.9" && pass
+teardown_scratch
+
+begin "postcss 8.5.6 (the deps3 image, CVE-2026-45623) is reported below its floor"
+setup_scratch
+good_tree "${SCRATCH}/app"
+pkg "${SCRATCH}/app/node_modules/postcss" postcss 8.5.6
+out="$(probe "${SCRATCH}/app")"
+assert_contains "${out}" "postcss@8.5.6" && assert_contains "${out}" "below=1" && pass
 teardown_scratch
 
 # --- the verifier -----------------------------------------------------------
