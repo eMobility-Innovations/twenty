@@ -34,15 +34,24 @@ Node 24.5+ or 26.5.1+, Yarn 4 (`npx corepack yarn …` where Corepack is not ins
     yarn install
     yarn typecheck && yarn test && yarn twenty app build   # what ./verify.sh runs
 
-Connect once to the supplier workspace (browser SSO; needs a workspace role that may manage
-applications):
+### Applying to the supplier workspace — run it FROM CT175
 
-    yarn twenty auth login --url https://esc-supplier.crm.fiszu.com --name esc-supplier
+From a workstation, `apply` fails at the upload step with `File storage answered 302`: the
+SSO edge in front of esc-supplier.crm.fiszu.com lets Bearer-authenticated API calls through
+but redirects the CLI's signed file-upload URL to Keycloak (measured 2026-11-23). From a fleet
+host the name resolves to the edge entrypoint without ForwardAuth (CT175 → 192.168.103.191),
+so run it there, in a throw-away Node container:
 
-Apply a change — always `plan` first and read the diff:
+    # credentials: an API key from Settings → Developers → API keys, role Admin (Applications
+    # permission), never committed; an env file root 0600, deleted afterwards
+    printf 'TWENTY_API_URL=https://esc-supplier.crm.fiszu.com\nTWENTY_API_KEY=%s\n' "$KEY" > /tmp/app.env
+    docker run --rm --network host -v "$PWD":/app -w /app --env-file /tmp/app.env \
+      node:24-bookworm-slim sh -c 'corepack enable && yarn install --immutable && yarn twenty app plan'
+    # read the plan, then the same with `yarn twenty app apply`   (first time: --create)
+    shred -u /tmp/app.env
 
-    yarn twenty app plan  --remote esc-supplier
-    yarn twenty app apply --remote esc-supplier          # first time: --create
+`--network host` matters: it gives the container CT175's resolver, hence the internal edge.
+First applied 2026-11-23 15:45 UTC (application + default role, nothing else).
 
 `apply` asks before deleting objects or fields; never pass `--yes` on this workspace unless
 the PR says which object or field is removed and why. Every entity needs a fixed
