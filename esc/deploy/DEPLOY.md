@@ -791,3 +791,41 @@ a FAIL, paged by the image watchdog on container start. Fired live against deps2
 digest as the operator's call) bundles tar 7.5.11. npm is never spawned by the server (no
 npm/yarn spawn in `dist`), and no Dependabot alert covers it. `node:24-alpine` today (v24.22.3)
 ships npm 11.19.1 with tar 7.5.22. The probe scans `/app/node_modules` only until Node moves.
+
+## 2026-11-23 — postcss critical (PR #78) + floor (PR #83): `twenty-esc-sso:v2.0.0-deps4`
+
+fleet-updates (CT231 update-intel) held one CRITICAL group on the running worker,
+`lockcve twenty-esc-worker-1/app`: postcss 8.5.6 at `/app/node_modules/postcss` in BOTH server
+and worker (read with `find` in the running deps3 containers), CVE-2026-45623 (9.1), fixed in
+8.5.12. Upstream v2.60.3 (the supplier stack on this CT) ships 8.5.31, so the fix stays in the
+v2 line without a Twenty upgrade.
+
+- **#78**: root resolution `"postcss": "^8.5.31"`; every descriptor (8.4.31, 8.4.49, 8.5.6, 8.5.8)
+  collapses to 8.5.33 (nanoid 3.3.20, source-map-js 1.2.4 in range).
+- **#79**: `assert-tree-accounted-for.sh` now counts `esc/new/` writes and lists untracked files;
+  the second build in CT140's checkout refused on the leftover `esc-tour/` copy without it.
+- Built on CT140 from `1f162e10` (the #78 merge): `build-source-image.sh --tag
+  twenty-esc-sso:v2.0.0-deps4 --app-version 2.0.0`; feature checks + boot smoke PASSED. Tarball
+  `/root/twenty-esc-sso_v2.0.0-deps4.tar.gz` sha256 `872b14b7…3f8a02`, identical on CT140 and
+  CT175, copied over the LAN (short-lived `http.server` on 192.168.103.140:18765, removed after).
+- Snapshot `pre-deps4-20261123` on CT103175 (esc03). Compose lines 4 + 42 -> `deps4`, backup
+  `docker-compose.yml.bak-pre-deps4-20261123`, `up -d server worker` at 21:56Z (outside UK hours).
+- Proof: server AND worker report postcss 8.5.33 only, tar 7.5.23; 0 restarts; image watchdog
+  4/4 (floor scanned=2051); public `/healthz` 200 and `/` 302 to Keycloak from the workstation;
+  REST `GET /rest/people?limit=1` on `esc.crm.fiszu.com` 200 (totalCount 28044); the worker
+  processed 35 BullMQ jobs in the first 20 minutes.
+- **#83 floor**: `dependency-floor-probe.cjs` gains `postcss: 8.5.12`. Fired live on CT175 against
+  the deps3 image: `below=1` (postcss@8.5.6); against deps4: `ok scanned=2051`.
+- **#83 installed** 2026-11-23 22:55Z (the 21:56Z deploy had left the Nov 16 probe in
+  `/opt/twenty-esc-image-watch`): trunk `bb4d0fc5` via `install-image-watch.sh`, backup
+  `/root/twenty-esc-image-watch.pre-floor83-20261123T2255Z.tgz`. Installed probe fired against a
+  throwaway deps3 container: `below=1` (postcss@8.5.6, floor 8.5.12); deps4 and live worker
+  `ok scanned=2051`; watchdog 4/4.
+- Rollback: lines 4 + 42 back to `deps3` (image in the store), `up -d server worker`.
+
+**Not changed, decision pending:** the `dependencies` lockcve row is the stored package of the
+standard application (`.local-storage/<workspace>/20202020-64aa-…/dependencies/yarn.lock`, and the
+custom app `248bec50-…`), written 2026-04-07 with tar 7.5.7 and nodemailer ^7. It is lockfile
+text only: no `node_modules` beside it, the logic-function driver is off (`LOGIC_FUNCTION_TYPE`
+unset, `core."logicFunction"` 0 rows, `core."logicFunctionLayer"` 0 rows). The image's seed lock
+already carries tar 7.5.23; existing apps keep the copy they were created with.
