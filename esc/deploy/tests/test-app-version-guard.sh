@@ -17,5 +17,36 @@ grep -q '^APP_VERSION=' "$(dirname "$SCRIPT")/smoke.env.template"; check "templa
 grep -q 'APP_VERSION)=' "$(dirname "$SCRIPT")/boot-smoke-test.sh"; check "smoke strips APP_VERSION" 0 "$?"
 VERIFY="$(dirname "$SCRIPT")/../../scripts/verify-esc-image.sh"
 grep -q 'APP_VERSION in the running container' "$VERIFY"; check "verify-esc-image checks live APP_VERSION" 0 "$?"
+
+# Stop at the Docker build boundary and capture its arguments in a clean fixture checkout.
+scratch="$(mktemp -d)" || exit 1
+trap 'rm -rf "$scratch"' EXIT
+mkdir -p "$scratch/esc/deploy/lib" "$scratch/esc/overlay" "$scratch/bin"
+cp "$SCRIPT" "$scratch/esc/deploy/"
+cp "$(dirname "$SCRIPT")/lib/assert-tree-accounted-for.sh" "$scratch/esc/deploy/lib/"
+cat > "$scratch/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$DOCKER_BUILD_ARGS"
+exit 79
+STUB
+chmod +x "$scratch/bin/docker"
+git -C "$scratch" init -q &&
+  git -C "$scratch" add esc bin &&
+  git -C "$scratch" -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=Test \
+    -c user.email=test@example.com commit -qm fixture || exit 1
+
+args="$(mktemp)" || exit 1
+trap 'rm -rf "$scratch"; rm -f "$args"' EXIT
+PATH="$scratch/bin:$PATH" DOCKER_BUILD_ARGS="$args" \
+  bash "$scratch/esc/deploy/build-source-image.sh" --skip-apply --tag t:x --app-version v2.0.0-deps3 >/dev/null
+check "reached Docker build" 79 "$?"
+for label in \
+  "source=https://github.com/eMobility-Innovations/twenty" \
+  "url=https://github.com/twentyhq/twenty" \
+  "version=2.0.0-deps3" \
+  "revision=$(git -C "$scratch" rev-parse HEAD)"; do
+  awk -v label="org.opencontainers.image.$label" '$0 == label && previous == "--label" { found = 1 } { previous = $0 } END { exit !found }' "$args"
+  check "Docker label $label" 0 "$?"
+done
 printf '%s test(s), %s failed\n' "$((PASS+FAIL))" "$FAIL"
 [ "$FAIL" -eq 0 ]

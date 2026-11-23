@@ -4,12 +4,16 @@
 # to report no failed workspace before moving on. Runs on CT175 in /root/twenty-esc-supplier.
 # The image is BUILT locally (Dockerfile: upstream + the SSO enterprise-gate patches) from
 # BUILD_DIR, a copy of this repo's esc/ directory; a patch whose anchor moved fails the build.
+# Set IMAGE_REVISION to the source commit when building from a copy without Git metadata.
 BUILD_DIR=${BUILD_DIR:-/root/twenty-esc-supplier-build}
 set -euo pipefail
 cd "$(dirname "$0")"
+revision=${IMAGE_REVISION:-$(git -C "$BUILD_DIR" rev-parse --verify HEAD 2>/dev/null || true)}
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || revision=
 for tag in "$@"; do
   # build BEFORE touching .env, so a failed patch leaves the running tag in place
-  docker build -q --build-arg TAG="$tag" -f "$BUILD_DIR/esc-supplier/Dockerfile" \
+  docker build -q --build-arg TAG="$tag" --build-arg IMAGE_VERSION="${tag#v}" \
+    --build-arg IMAGE_REVISION="$revision" -f "$BUILD_DIR/esc-supplier/Dockerfile" \
     -t "twenty-esc-supplier-sso:$tag" "$BUILD_DIR"
   sed -i "s/^TAG=.*/TAG=$tag/" .env
   grep -q "^TAG=$tag$" .env || echo "TAG=$tag" >> .env

@@ -32,11 +32,14 @@ in the compose file lets Twenty's SSRF guard reach Keycloak, which resolves to t
 
 ## Deploy / upgrade
 
+Record the full commit with `git rev-parse --verify HEAD` in the source checkout before copying
+`esc/`. Pass that commit as `IMAGE_REVISION` when running the upgrade from a copy.
+
     # copy this repo's esc/ (at least deploy/patch-enterprise.cjs and esc-supplier/) to
     # /root/twenty-esc-supplier-build on CT175, then:
     pct snapshot 175 <name>                      # on the CT175 node
     docker compose exec -T db pg_dumpall -U postgres > /root/twenty-esc-supplier-backup-<date>.sql
-    ./upgrade.sh v2.61.0 ...                     # builds each tag, one step at a time, stops on failure
+    IMAGE_REVISION=<commit> ./upgrade.sh v2.61.0 ...  # builds each tag, stops on failure
 
 Migrations run on server start. Twenty >= 2.34 needs PostgreSQL >= 15 (this stack runs 16).
 
