@@ -89,7 +89,7 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
    `src/constants/core-identifiers.ts`.
 4. `./verify.sh` green, `twenty app plan` read (expected adds, **0 destroys** unless the PR says
    which object or field is removed and why).
-5. PR to Karol. After merge, apply from CT175 (`apps/core/README.md` → "Applying").
+5. PR (Andrew's: review by Karol; Karol's: straight to the merge queue). After merge, apply from CT175 (`apps/core/README.md` → "Applying").
 
 ## Tests and gate
 
@@ -102,7 +102,9 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
 
 - One concern per PR, one module per PR; a change to core and a module that needs it are two
   PRs, core first.
-- **Every PR to the supplier CRM is reviewed by Karol** — Andrew's included.
+- **Review (Karol, 2026-11-23):** Karol's own changes (his sessions included) land straight
+  through the merge queue once `./verify.sh` is green. **Andrew's PRs are reviewed by Karol**
+  before they merge.
 - PR body: Redmine id, the `twenty app plan` summary (adds / changes / destroys), how it was
   checked on esc-supplier.
 - Until V1 there is no test instance: apply to esc-supplier itself, which nobody uses yet. A test
