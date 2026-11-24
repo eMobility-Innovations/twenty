@@ -109,10 +109,11 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
 - PR body: Redmine id, the `twenty app plan` summary (adds / changes / destroys), how it was
   checked on esc-supplier.
 - **Who applies (Karol, 2026-11-24):** an app reaches the workspace only after its PR is merged,
-  never from an unmerged branch. Andrew's role in the workspace is Member: he does not plan or
-  apply. His PR body carries the Redmine id and what `./verify.sh` ran for the app (typecheck,
-  unit tests, build); Karol's side runs `twenty app plan` at review, adds its summary to the PR,
-  and applies from CT175 after the merge.
+  never from an unmerged branch. The author applies it, from CT175, with their own API key
+  (`apps/core/README.md` → "Applying"), never a shared one. Andrew holds the Admin role in the
+  workspace for this (Karol changed it from Member the same day): he runs `twenty app plan`
+  himself and puts its summary in the PR body, and his apply waits for Karol's review and the
+  merge.
 - Until V1 there is no test instance: apply to esc-supplier itself. The forms module is live
   there and holds supplier answers from its first real campaign on, so a plan with a destroy is
   applied only when the PR names the object or field and why. A test instance is requested at V1.
