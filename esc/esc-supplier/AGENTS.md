@@ -89,7 +89,8 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
    `src/constants/core-identifiers.ts`.
 4. `./verify.sh` green, `twenty app plan` read (expected adds, **0 destroys** unless the PR says
    which object or field is removed and why).
-5. PR (Andrew's: review by Karol; Karol's: straight to the merge queue). After merge, apply from CT175 (`apps/core/README.md` → "Applying").
+5. PR (Andrew's: review by Karol; Karol's: straight to the merge queue). After merge, apply from
+   CT175 (`apps/core/README.md` → "Applying"); who applies is under "Pull requests" below.
 
 ## Tests and gate
 
@@ -107,8 +108,14 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
   before they merge.
 - PR body: Redmine id, the `twenty app plan` summary (adds / changes / destroys), how it was
   checked on esc-supplier.
-- Until V1 there is no test instance: apply to esc-supplier itself, which nobody uses yet. A test
-  instance is requested at V1.
+- **Who applies (Karol, 2026-11-24):** an app reaches the workspace only after its PR is merged,
+  never from an unmerged branch. Andrew's role in the workspace is Member: he does not plan or
+  apply. His PR body carries the Redmine id and what `./verify.sh` ran for the app (typecheck,
+  unit tests, build); Karol's side runs `twenty app plan` at review, adds its summary to the PR,
+  and applies from CT175 after the merge.
+- Until V1 there is no test instance: apply to esc-supplier itself. The forms module is live
+  there and holds supplier answers from its first real campaign on, so a plan with a destroy is
+  applied only when the PR names the object or field and why. A test instance is requested at V1.
 
 ## Data
 
