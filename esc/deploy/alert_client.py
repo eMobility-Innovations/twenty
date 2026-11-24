@@ -74,7 +74,7 @@ CONTRACT_VERSION = "v1"
 # getting the old client, and `policy/vendored-artefacts.json` could not notice because
 # its `alert-client` entry was disabled for want of a version to compare and an upstream
 # to compare it with. Both are now declared. BUMP THIS on every change to this file.
-CLIENT_VERSION = "1.25.0"
+CLIENT_VERSION = "1.26.0"
 # THE NAME. Was `alert-relay.ha.fiszu.com` from 2026-08-12; changed 2026-08-18 because
 # that name CANNOT work from outside the LAN and never could. Public DNS sends `.ha` names
 # to Cloudflare, whose Universal SSL certificate covers `fiszu.com, *.fiszu.com` — ONE
@@ -699,11 +699,18 @@ class AlertClient:
         self.alt_url = alt_url if alt_url and alt_url != self.url else ""
         # EVERY rung, in order, RFC1918 LAST. A caller that pinned `url` gets exactly what
         # it asked for plus its own alt; only the default chain is direction-aware. Losing
-        # a rung turns a reachable relay into a spooled alert, so nothing is dropped —
-        # they are merely tried in the order this direction makes cheapest.
+        # a rung turns a reachable relay into a spooled alert, so nothing that CAN answer
+        # is dropped — they are merely tried in the order this direction makes cheapest.
+        # The one exception is the `.ha` rung OFF-FLEET: there the name resolves publicly
+        # to an edge presenting its default certificate, so that rung can never answer
+        # (seen from the workstation 2026-11-23: CERTIFICATE_VERIFY_FAILED, estate-repair
+        # claims/relay-recurring-outage-2026-11-23.md F-c) and only burns its timeout.
         self.rungs = [self.url]
         if not pinned:
-            for extra in (DEFAULT_HA_URL, DEFAULT_URL):
+            # OFF-FLEET the `.ha` name resolves publicly (an edge with a wrong cert),
+            # costing a full `timeout` per send; add that rung only inside the estate.
+            in_estate = inside_the_estate()
+            for extra in ((DEFAULT_HA_URL,) if in_estate else ()) + (DEFAULT_URL,):
                 if extra not in self.rungs:
                     self.rungs.append(extra)
         if self.alt_url and self.alt_url not in self.rungs:
