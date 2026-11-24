@@ -1,0 +1,1 @@
+twenty fork checkout: a build tree, never a deployment; see proxmox-fleet-manager docs/modules/update-intel.md "Owner-declared build roots"

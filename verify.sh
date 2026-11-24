@@ -278,6 +278,46 @@ check_lock(seed / "yarn.lock", {name: floors[name] for name in ("nodemailer", "t
 print("dependency-floors: root, server and seed manifest and lockfile security floors hold.")
 PYTHON
 
+echo "gate: the fleet build-root marker must never reach an image"
+# `.fleet-build-root` (repo root) declares every checkout of this fork a BUILD TREE to the
+# fleet's update-intel collector (proxmox-fleet-manager docs/modules/update-intel.md,
+# "Owner-declared build roots"), so lockfiles of upstream example apps in a build checkout
+# are not rated as deployments. It is safe ONLY while no image copies the repo root
+# wholesale: a `COPY . …` / `ADD ./ …` would ship the marker and hide a real deployment.
+# This check refuses such a line in any tracked Dockerfile, and proves itself on a fixture.
+root_copy_lines() {
+  grep -nHE '^[[:space:]]*(COPY|ADD)([[:space:]]+--[^[:space:]]+)*[[:space:]]+\.?/?[[:space:]]' "$@" || true
+}
+build_root_fixture="$(mktemp)"
+printf 'FROM scratch\nCOPY --chown=1000 . /app\n' > "$build_root_fixture"
+if [ -z "$(root_copy_lines "$build_root_fixture")" ]; then
+  rm -f "$build_root_fixture"
+  echo "build-root: SELF-TEST FAILED — a wholesale root COPY fixture was not detected" >&2
+  exit 1
+fi
+rm -f "$build_root_fixture"
+if [ ! -s .fleet-build-root ]; then
+  echo "build-root: .fleet-build-root is missing or empty at the repo root" >&2
+  exit 1
+fi
+dockerfiles="$(git ls-files -- '*Dockerfile*' 2>/dev/null || true)"
+if [ -z "$dockerfiles" ]; then
+  # The shared gate runner's payload has no git repository (see fork-scope below).
+  dockerfiles="$(find . -name 'Dockerfile*' -not -path '*/node_modules/*' -not -path './.git/*')"
+fi
+root_copies="$(printf '%s\n' "$dockerfiles" | while IFS= read -r f; do
+  [ -f "$f" ] && root_copy_lines "$f"
+done)"
+if [ -n "$root_copies" ]; then
+  {
+    echo "build-root: a Dockerfile copies the repo root wholesale, which would ship .fleet-build-root:"
+    echo "$root_copies" | sed 's/^/    /'
+    echo "  Copy named files and packages only."
+  } >&2
+  exit 1
+fi
+echo "build-root: marker present; no Dockerfile copies the repo root."
+
 echo "gate: org-specific application changes must have targeted checks"
 
 # ---------------------------------------------------------------------------
@@ -450,6 +490,8 @@ if [ -n "${DIFF_RANGE:-}" ]; then
 # UNRELATED edit to one of those three files no longer trips this check — the
 # typecheck above is what covers them instead.
 # ---------------------------------------------------------------------------
+# Added 2026-11-24: .fleet-build-root, the update-intel build-tree marker, is covered by
+# the build-root gate above (marker present, no Dockerfile copies the repo root).
 # Added 2026-11-20: .openapi-policy.toml holds gate policy (waiver records),
 # like REPO-CONTRACT.toml. todo/*.md holds records, like docs/handovers/*.md.
 # The root and server manifests, root lockfile, seed manifest and seed lockfile
@@ -465,7 +507,7 @@ unexpected="$({
   git diff --name-only
   git diff --cached --name-only
   git ls-files --others --exclude-standard
-} | sort -u | grep -Ev '^($|\.upstream-sync|\.githooks/pre-push(\.vendored|\.local)?|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|docs/preflight/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|\.gitignore|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/2-0/2-0-instance-command-fast-[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/instance-commands\.constant\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts|\.openapi-policy\.toml|todo/.*\.md|package\.json|yarn\.lock|packages/twenty-server/package\.json|packages/twenty-server/src/engine/core-modules/application/application-package/constants/seed-dependencies/package\.json|packages/twenty-server/src/engine/core-modules/application/application-package/constants/seed-dependencies/yarn\.lock)$' || true)"
+} | sort -u | grep -Ev '^($|\.fleet-build-root|\.upstream-sync|\.githooks/pre-push(\.vendored|\.local)?|\.githooks/pre-commit|\.sync-upstream\.conf|README\.md|REPO-CONTRACT\.toml|check-no-workflows\.sh|docs/UPSTREAM-DIVERGENCE\.md|install-hooks\.sh|sync-upstream\.sh|verify\.sh|\.github/workflows/.*|docs/esc-onboarding-wizard\.md|docs/handovers/.*\.md|docs/preflight/.*\.md|esc/.*|scripts/PATCH_MANIFEST\.md|scripts/esc-modified-files\.txt|scripts/verify-esc-[a-z-]+\.sh|\.gitignore|packages/twenty-server/src/engine/core-modules/esc-onboarding/.*|packages/twenty-server/src/database/typeorm/core/migrations/common/[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/2-0/2-0-instance-command-fast-[0-9]+-add-esc-onboarding\.ts|packages/twenty-server/src/database/commands/upgrade-version-command/instance-commands\.constant\.ts|packages/twenty-shared/src/types/FeatureFlagKey\.ts|packages/twenty-server/src/engine/core-modules/core-engine\.module\.ts|packages/twenty-server/src/engine/twenty-orm/entity-manager/workspace-entity-manager\.spec\.ts|\.openapi-policy\.toml|todo/.*\.md|package\.json|yarn\.lock|packages/twenty-server/package\.json|packages/twenty-server/src/engine/core-modules/application/application-package/constants/seed-dependencies/package\.json|packages/twenty-server/src/engine/core-modules/application/application-package/constants/seed-dependencies/yarn\.lock)$' || true)"
 
 if [ -n "$unexpected" ]; then
   {
