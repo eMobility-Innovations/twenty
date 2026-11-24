@@ -28,4 +28,9 @@ describe('supplier object', () => {
   it('should keep the Credit Tracker id optional', () => {
     expect(field('creditTrackerId')?.isNullable).toBe(true);
   });
+
+  it('should keep both archive fields optional', () => {
+    expect(field('archivedAt')).toMatchObject({ isNullable: true, defaultValue: null });
+    expect(field('archivedReason')).toMatchObject({ isNullable: true });
+  });
 });
