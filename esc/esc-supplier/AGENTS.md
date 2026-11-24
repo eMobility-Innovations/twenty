@@ -124,3 +124,14 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
   core by twenty-ingest, read-only from the Credit Tracker. Twenty becomes the source of truth
   later, as its own cut-over step. Nothing is added to the Credit Tracker.
 - Secrets live only in the host `.env` or the CLI config of the person applying, never in git.
+
+## Archive, never delete (Karol, 2026-11-24)
+
+- Archive any record that goes out of use. Never delete it, so its history stays readable.
+  Twenty's record timeline shows who changed what and when.
+- Core `supplier` carries `archivedAt` and `archivedReason`. `archivedAt` is the one fact for
+  whether a supplier is out of use. A module with its own status (such as `Historical`) builds
+  on that fact and never keeps a second flag.
+- Give every other object that can go out of use its own `archivedAt` the next time its module
+  is changed.
+- No `twenty-ingest` API key role may delete records.

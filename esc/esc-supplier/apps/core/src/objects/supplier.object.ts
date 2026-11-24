@@ -1,6 +1,8 @@
 import { defineObject, FieldType } from 'twenty-sdk/define';
 
 import {
+  SUPPLIER_ARCHIVED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_ARCHIVED_REASON_FIELD_UNIVERSAL_IDENTIFIER,
   SUPPLIER_CONTACT_NAME_FIELD_UNIVERSAL_IDENTIFIER,
   SUPPLIER_CREDIT_TRACKER_ID_FIELD_UNIVERSAL_IDENTIFIER,
   SUPPLIER_EMAILS_FIELD_UNIVERSAL_IDENTIFIER,
@@ -106,6 +108,24 @@ export default defineObject({
       universalSettings: { dataType: 'int' },
       isNullable: true,
       defaultValue: null,
+    },
+    {
+      universalIdentifier: SUPPLIER_ARCHIVED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'archivedAt',
+      type: FieldType.DATE_TIME,
+      label: 'Archived at',
+      description:
+        'When this supplier went out of use; empty while it is in use. A supplier is archived, never deleted.',
+      isNullable: true,
+      defaultValue: null,
+    },
+    {
+      universalIdentifier: SUPPLIER_ARCHIVED_REASON_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'archivedReason',
+      type: FieldType.TEXT,
+      label: 'Archive reason',
+      description: "Why it was archived and by what, for example 'Credit Tracker: archived there'.",
+      isNullable: true,
     },
   ],
 });
