@@ -14,6 +14,11 @@ const NEVER_DELETES = { canSoftDeleteAllRecords: false, canDestroyAllRecords: fa
 // What the API key of twenty-ingest may do. That service answers the no-login form page, the
 // one part of the supplier CRM a stranger can reach, so its key gets the forms data and
 // nothing else: no settings, no members, no other module's records, and it never deletes.
+//
+// Every object below grants update, because on Twenty 2.60 a create is refused without it
+// (measured on esc-supplier, 2026-11-24: read + create alone answered 403 on POST). So this
+// role cannot make answers append-only by itself; the logic in twenty-ingest has no code path
+// that updates one. Narrow these to read + create when Twenty separates the two.
 export default defineRole({
   universalIdentifier: FORMS_INGEST_ROLE_UNIVERSAL_IDENTIFIER,
   label: 'ESC Supplier — Forms ingest',
@@ -30,11 +35,11 @@ export default defineRole({
     canDestroyAllRecords: false,
     objects: [
       {
-        // The recipient import adds a missing supplier and never overwrites an existing one.
+        // The recipient import adds a missing supplier; its code never overwrites an existing one.
         objectUniversalIdentifier: SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
         canReadAllRecords: true,
         canCreateAllRecords: true,
-        canUpdateAllRecords: false,
+        canUpdateAllRecords: true,
         ...NEVER_DELETES,
       },
       {
@@ -49,7 +54,7 @@ export default defineRole({
         objectUniversalIdentifier: SUPPLIER_FORM_CAMPAIGN_OBJECT_UNIVERSAL_IDENTIFIER,
         canReadAllRecords: true,
         canCreateAllRecords: true,
-        canUpdateAllRecords: false,
+        canUpdateAllRecords: true,
         ...NEVER_DELETES,
       },
       {
@@ -61,11 +66,11 @@ export default defineRole({
         ...NEVER_DELETES,
       },
       {
-        // Append-only, enforced here for this key: it can add an answer and never change one.
+        // Append-only by the logic (see the note above), not by this role.
         objectUniversalIdentifier: SUPPLIER_FORM_ANSWER_OBJECT_UNIVERSAL_IDENTIFIER,
         canReadAllRecords: true,
         canCreateAllRecords: true,
-        canUpdateAllRecords: false,
+        canUpdateAllRecords: true,
         ...NEVER_DELETES,
       },
     ],

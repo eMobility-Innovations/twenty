@@ -21,14 +21,15 @@ Relations use `SET_NULL`, so deleting a campaign or a supplier never deletes ans
 ## The key twenty-ingest uses
 
 `src/roles/forms-ingest.role.ts` is the role for the API key of twenty-ingest ("ESC Supplier —
-Forms ingest", assignable to API keys only). It reads and adds suppliers and forms records,
-updates only form versions (to retire one) and recipients (status, timestamps), cannot change
-or delete an answer, and reaches nothing else in the workspace. twenty-ingest answers the
-no-login page, so its key is never an Admin key.
+Forms ingest", assignable to API keys only). It reads, adds and updates suppliers and the four
+forms objects, never deletes, and reaches nothing else in the workspace (a read of `people`
+with this key answers 403). twenty-ingest answers the no-login page, so its key is never an
+Admin key.
 
-**Limit:** a workspace member can still edit an answer by hand (an object locked against every
-edit is also locked against the key that writes it). Any such edit shows in the record's
-timeline.
+**Limit:** answers are append-only by the logic, not by Twenty. On Twenty 2.60 a role cannot
+create a record without also being allowed to update it (measured 2026-11-24), and a workspace
+member can edit an answer by hand. twenty-ingest has no code path that changes an answer, and
+any edit shows in the record's timeline.
 
 ## Where the logic is
 
