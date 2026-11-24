@@ -18,9 +18,17 @@ The module adds one field to the core `supplier` object, `formsRecipients`; it l
 
 Relations use `SET_NULL`, so deleting a campaign or a supplier never deletes answers.
 
-**Limit:** Twenty cannot refuse an edit of an answer by a workspace member (an object locked
-against edits is also locked against the API key that writes it). The logic never edits or
-deletes an answer, and any edit made by hand shows in the record's timeline.
+## The key twenty-ingest uses
+
+`src/roles/forms-ingest.role.ts` is the role for the API key of twenty-ingest ("ESC Supplier —
+Forms ingest", assignable to API keys only). It reads and adds suppliers and forms records,
+updates only form versions (to retire one) and recipients (status, timestamps), cannot change
+or delete an answer, and reaches nothing else in the workspace. twenty-ingest answers the
+no-login page, so its key is never an Admin key.
+
+**Limit:** a workspace member can still edit an answer by hand (an object locked against every
+edit is also locked against the key that writes it). Any such edit shows in the record's
+timeline.
 
 ## Where the logic is
 
