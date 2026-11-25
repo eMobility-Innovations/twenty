@@ -1,0 +1,83 @@
+import { defineView, getFieldUniversalIdentifier, ViewFilterOperand } from 'twenty-sdk/define';
+
+import {
+  SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_ARCHIVED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+  CORE_APPLICATION_UNIVERSAL_IDENTIFIER,
+} from 'src/constants/core-identifiers';
+import {
+  SUPPLIER_LIFECYCLE_STATUS_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_LIFECYCLE_TRIAGE_SCORE_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_LIFECYCLE_TRIAGE_FIT_SIGNAL_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_LIFECYCLE_TRIAGE_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_LIFECYCLE_PENDING_DECISION_FIELD_UNIVERSAL_IDENTIFIER,
+  PARKED_SUPPLIERS_TRIAGE_VIEW_UNIVERSAL_IDENTIFIER,
+  PARKED_SUPPLIERS_TRIAGE_NAME_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  PARKED_SUPPLIERS_TRIAGE_SCORE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  PARKED_SUPPLIERS_TRIAGE_FIT_SIGNAL_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  PARKED_SUPPLIERS_TRIAGE_TRIAGE_DATE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  PARKED_SUPPLIERS_TRIAGE_PENDING_DECISION_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  PARKED_SUPPLIERS_TRIAGE_NOT_ARCHIVED_FILTER_UNIVERSAL_IDENTIFIER,
+  PARKED_SUPPLIERS_TRIAGE_STATUS_FILTER_UNIVERSAL_IDENTIFIER,
+} from 'src/constants/universal-identifiers';
+
+export default defineView({
+  universalIdentifier: PARKED_SUPPLIERS_TRIAGE_VIEW_UNIVERSAL_IDENTIFIER,
+  name: 'Parked suppliers (triage)',
+  objectUniversalIdentifier: SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
+  fields: [
+    {
+      universalIdentifier: PARKED_SUPPLIERS_TRIAGE_NAME_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier: getFieldUniversalIdentifier({
+        applicationUniversalIdentifier: CORE_APPLICATION_UNIVERSAL_IDENTIFIER,
+        objectUniversalIdentifier: SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
+        name: 'name',
+      }),
+      position: 0,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: PARKED_SUPPLIERS_TRIAGE_SCORE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier:
+        SUPPLIER_LIFECYCLE_TRIAGE_SCORE_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 1,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: PARKED_SUPPLIERS_TRIAGE_FIT_SIGNAL_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier:
+        SUPPLIER_LIFECYCLE_TRIAGE_FIT_SIGNAL_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 2,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: PARKED_SUPPLIERS_TRIAGE_TRIAGE_DATE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier:
+        SUPPLIER_LIFECYCLE_TRIAGE_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 3,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: PARKED_SUPPLIERS_TRIAGE_PENDING_DECISION_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier:
+        SUPPLIER_LIFECYCLE_PENDING_DECISION_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 4,
+      isVisible: true,
+    },
+  ],
+  filters: [
+    {
+      universalIdentifier: PARKED_SUPPLIERS_TRIAGE_NOT_ARCHIVED_FILTER_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier: SUPPLIER_ARCHIVED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+      operand: ViewFilterOperand.IS_EMPTY,
+      value: '',
+    },
+    {
+      universalIdentifier: PARKED_SUPPLIERS_TRIAGE_STATUS_FILTER_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier:
+        SUPPLIER_LIFECYCLE_STATUS_FIELD_UNIVERSAL_IDENTIFIER,
+      operand: ViewFilterOperand.IS,
+      value: '["PARKED"]',
+    },
+  ],
+});
