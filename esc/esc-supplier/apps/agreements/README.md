@@ -63,8 +63,14 @@ Two navigation menu items, each pointing at the curated view, not the bare objec
 
 ## Attaching signed documents
 
-**Not established yet.** How a signed document (for example the MOU) is attached to an agreement
-will be checked on the live workspace after the app is applied, then this README updated.
+A signed document (for example the MOU) goes on the agreement's own record page, tab **Files**.
+Twenty gives every object its standard record tabs (Timeline, Tasks, Notes, Files), so the module
+declares no file field. Seen on esc-supplier on 25 Nov 2026: the agreement page shows the Files
+tab and the API returns an `attachments` relation on `supplierAgreement`. An actual upload was not
+done in that check.
+
+Twenty also creates its own default views "All Agreements" and "All Commitments" next to the
+module's "All agreements" and "All commitments".
 
 ## Taking the module out of use
 
