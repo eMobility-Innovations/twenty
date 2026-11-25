@@ -1,3 +1,4 @@
+import { STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS, SystemPermissionFlag } from 'twenty-sdk/define';
 import {
   SUPPLIER_AGREEMENT_COMMITMENT_OBJECT_UNIVERSAL_IDENTIFIER,
   SUPPLIER_AGREEMENT_OBJECT_UNIVERSAL_IDENTIFIER,
@@ -34,6 +35,7 @@ type RoleRecord = {
   canBeAssignedToUsers: boolean;
   canBeAssignedToApiKeys: boolean;
   canBeAssignedToAgents: boolean;
+  permissionFlagUniversalIdentifiers?: string[];
   recordsPermissions: {
     canReadAllRecords: boolean;
     canUpdateAllRecords: boolean;
@@ -128,11 +130,34 @@ describe('ecom role', () => {
     }
   });
 
-  it('should list exactly seven objects, each once', () => {
+  it('should grant read, create and update on the standard note, task and attachment objects', () => {
+    const identifiers = [
+      STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.note.universalIdentifier,
+      STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.task.universalIdentifier,
+      STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.noteTarget.universalIdentifier,
+      STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.taskTarget.universalIdentifier,
+      STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.attachment.universalIdentifier,
+    ];
+    for (const identifier of identifiers) {
+      const object = byIdentifier(ecom, identifier);
+      expect(object).toBeDefined();
+      expect(object!.canReadAllRecords).toBe(true);
+      expect(object!.canCreateAllRecords).toBe(true);
+      expect(object!.canUpdateAllRecords).toBe(true);
+    }
+  });
+
+  it('should grant exactly the upload and download file permission flags', () => {
+    expect((ecom.config.permissionFlagUniversalIdentifiers ?? []).slice().sort()).toEqual(
+      [SystemPermissionFlag.UPLOAD_FILE, SystemPermissionFlag.DOWNLOAD_FILE].sort(),
+    );
+  });
+
+  it('should list exactly twelve objects, each once', () => {
     const objects = ecom.config.recordsPermissions.objects ?? [];
-    expect(objects).toHaveLength(7);
+    expect(objects).toHaveLength(12);
     const identifiers = objects.map((object) => object.objectUniversalIdentifier);
-    expect(new Set(identifiers).size).toBe(7);
+    expect(new Set(identifiers).size).toBe(12);
   });
 });
 

@@ -1,4 +1,4 @@
-import { defineRole } from 'twenty-sdk/define';
+import { defineRole, STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS, SystemPermissionFlag } from 'twenty-sdk/define';
 
 import {
   SUPPLIER_AGREEMENT_COMMITMENT_OBJECT_UNIVERSAL_IDENTIFIER,
@@ -20,7 +20,8 @@ import { ECOM_ROLE_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifi
 const NEVER_DELETES = { canSoftDeleteAllRecords: false, canDestroyAllRecords: false };
 
 // Ecom edits the supplier's basic data and the forms records; the status, the triage result and
-// the agreements are read-only for it; it never deletes a record. canBeAssignedToApiKeys is true
+// the agreements are read-only for it; it never deletes a record. Ecom also writes notes and
+// tasks on a record and adds files to it (Karol, 25 Nov 2026). canBeAssignedToApiKeys is true
 // so the role can be tested with an API key.
 export default defineRole({
   universalIdentifier: ECOM_ROLE_UNIVERSAL_IDENTIFIER,
@@ -32,6 +33,10 @@ export default defineRole({
   canBeAssignedToAgents: false,
   canBeAssignedToUsers: true,
   canBeAssignedToApiKeys: true,
+  permissionFlagUniversalIdentifiers: [
+    SystemPermissionFlag.UPLOAD_FILE,
+    SystemPermissionFlag.DOWNLOAD_FILE,
+  ],
   recordsPermissions: {
     canReadAllRecords: true,
     canUpdateAllRecords: false,
@@ -77,6 +82,44 @@ export default defineRole({
       },
       {
         objectUniversalIdentifier: SUPPLIER_FORM_ANSWER_OBJECT_UNIVERSAL_IDENTIFIER,
+        canReadAllRecords: true,
+        canCreateAllRecords: true,
+        canUpdateAllRecords: true,
+        ...NEVER_DELETES,
+      },
+      {
+        objectUniversalIdentifier: STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.note.universalIdentifier,
+        canReadAllRecords: true,
+        canCreateAllRecords: true,
+        canUpdateAllRecords: true,
+        ...NEVER_DELETES,
+      },
+      {
+        objectUniversalIdentifier: STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.task.universalIdentifier,
+        canReadAllRecords: true,
+        canCreateAllRecords: true,
+        canUpdateAllRecords: true,
+        ...NEVER_DELETES,
+      },
+      {
+        objectUniversalIdentifier:
+          STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.noteTarget.universalIdentifier,
+        canReadAllRecords: true,
+        canCreateAllRecords: true,
+        canUpdateAllRecords: true,
+        ...NEVER_DELETES,
+      },
+      {
+        objectUniversalIdentifier:
+          STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.taskTarget.universalIdentifier,
+        canReadAllRecords: true,
+        canCreateAllRecords: true,
+        canUpdateAllRecords: true,
+        ...NEVER_DELETES,
+      },
+      {
+        objectUniversalIdentifier:
+          STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS.attachment.universalIdentifier,
         canReadAllRecords: true,
         canCreateAllRecords: true,
         canUpdateAllRecords: true,
