@@ -90,6 +90,16 @@ describe('agreements module objects', () => {
   });
 });
 
+// defineField returns a union over every field type; only a relation field has these properties.
+type Relation = {
+  config: {
+    universalSettings?: { relationType?: unknown } | null;
+    relationTargetObjectMetadataUniversalIdentifier?: string;
+    relationTargetFieldMetadataUniversalIdentifier?: string;
+  };
+};
+const relation = (field: unknown) => field as Relation;
+
 describe('agreements module relations', () => {
   it('should hang agreements on the core supplier, each side naming the other', () => {
     expect(supplierOnSupplierAgreement.errors).toEqual([]);
@@ -98,7 +108,7 @@ describe('agreements module relations', () => {
     expect(supplierOnSupplierAgreement.config.objectUniversalIdentifier).toBe(
       SUPPLIER_AGREEMENT_OBJECT_UNIVERSAL_IDENTIFIER,
     );
-    expect(supplierOnSupplierAgreement.config.universalSettings.relationType).toBe(
+    expect(relation(supplierOnSupplierAgreement).config.universalSettings?.relationType).toBe(
       RelationType.MANY_TO_ONE,
     );
     expect(supplierOnSupplierAgreement.config.relationTargetObjectMetadataUniversalIdentifier).toBe(
@@ -111,7 +121,7 @@ describe('agreements module relations', () => {
     expect(agreementsRecordsOnSupplier.config.objectUniversalIdentifier).toBe(
       SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
     );
-    expect(agreementsRecordsOnSupplier.config.universalSettings.relationType).toBe(
+    expect(relation(agreementsRecordsOnSupplier).config.universalSettings?.relationType).toBe(
       RelationType.ONE_TO_MANY,
     );
     expect(agreementsRecordsOnSupplier.config.relationTargetObjectMetadataUniversalIdentifier).toBe(
@@ -129,24 +139,24 @@ describe('agreements module relations', () => {
     expect(agreementOnSupplierAgreementCommitment.config.objectUniversalIdentifier).toBe(
       SUPPLIER_AGREEMENT_COMMITMENT_OBJECT_UNIVERSAL_IDENTIFIER,
     );
-    expect(agreementOnSupplierAgreementCommitment.config.universalSettings.relationType).toBe(
+    expect(relation(agreementOnSupplierAgreementCommitment).config.universalSettings?.relationType).toBe(
       RelationType.MANY_TO_ONE,
     );
     expect(
-      agreementOnSupplierAgreementCommitment.config.relationTargetObjectMetadataUniversalIdentifier,
+      relation(agreementOnSupplierAgreementCommitment).config.relationTargetObjectMetadataUniversalIdentifier,
     ).toBe(SUPPLIER_AGREEMENT_OBJECT_UNIVERSAL_IDENTIFIER);
     expect(
-      agreementOnSupplierAgreementCommitment.config.relationTargetFieldMetadataUniversalIdentifier,
+      relation(agreementOnSupplierAgreementCommitment).config.relationTargetFieldMetadataUniversalIdentifier,
     ).toBe(SUPPLIER_AGREEMENT_COMMITMENTS_FIELD_UNIVERSAL_IDENTIFIER);
     expect(commitmentsOnSupplierAgreement.config.name).toBe('commitments');
     expect(commitmentsOnSupplierAgreement.config.objectUniversalIdentifier).toBe(
       SUPPLIER_AGREEMENT_OBJECT_UNIVERSAL_IDENTIFIER,
     );
-    expect(commitmentsOnSupplierAgreement.config.universalSettings.relationType).toBe(
+    expect(relation(commitmentsOnSupplierAgreement).config.universalSettings?.relationType).toBe(
       RelationType.ONE_TO_MANY,
     );
     expect(
-      commitmentsOnSupplierAgreement.config.relationTargetObjectMetadataUniversalIdentifier,
+      relation(commitmentsOnSupplierAgreement).config.relationTargetObjectMetadataUniversalIdentifier,
     ).toBe(SUPPLIER_AGREEMENT_COMMITMENT_OBJECT_UNIVERSAL_IDENTIFIER);
     expect(commitmentsOnSupplierAgreement.config.relationTargetFieldMetadataUniversalIdentifier).toBe(
       SUPPLIER_AGREEMENT_COMMITMENT_AGREEMENT_FIELD_UNIVERSAL_IDENTIFIER,
