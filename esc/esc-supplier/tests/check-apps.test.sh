@@ -37,7 +37,7 @@ EOF
     > "$mod/src/objects/fixture.object.ts"
 }
 
-ACC_APP="$(uuid)"; ACC_ROLE="$(uuid)"
+ACC_APP="$(uuid)"; ACC_ROLE="$(uuid)"; ACC_DEFAULT_ROLE="$(uuid)"
 
 add_access() {
   # The third class above the modules: roles for people only. Declares its own
@@ -48,6 +48,7 @@ add_access() {
   cat > "$acc/src/constants/universal-identifiers.ts" <<EOF
 export const APPLICATION_UNIVERSAL_IDENTIFIER = '$ACC_APP';
 export const ROLE_UNIVERSAL_IDENTIFIER = '$ACC_ROLE';
+export const DEFAULT_ROLE_UNIVERSAL_IDENTIFIER = '$ACC_DEFAULT_ROLE';
 EOF
   cat > "$acc/src/constants/module-identifiers.ts" <<EOF
 // app: core
@@ -60,6 +61,9 @@ EOF
     > "$acc/src/application.ts"
   printf "import { defineRole } from 'twenty-sdk';\nimport { ROLE_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';\nimport { SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER, FIXTURE_OBJECT_UNIVERSAL_IDENTIFIER, SUPPLIER_ON_FIXTURE_FIELD_UNIVERSAL_IDENTIFIER } from 'src/constants/module-identifiers';\nexport default defineRole({ universalIdentifier: ROLE_UNIVERSAL_IDENTIFIER, displayName: 'ESC Supplier - Admin', objectAccesses: [{ object: { universalIdentifier: SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER } }, { object: { universalIdentifier: FIXTURE_OBJECT_UNIVERSAL_IDENTIFIER }, field: { universalIdentifier: SUPPLIER_ON_FIXTURE_FIELD_UNIVERSAL_IDENTIFIER } }] });\n" \
     > "$acc/src/roles/admin.role.ts"
+  # The default function role every app carries (the build wires it into the manifest).
+  printf "import { defineApplicationRole } from 'twenty-sdk';\nimport { DEFAULT_ROLE_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';\nexport default defineApplicationRole({ universalIdentifier: DEFAULT_ROLE_UNIVERSAL_IDENTIFIER, label: 'default function role' });\n" \
+    > "$acc/src/default-role.ts"
 }
 
 expect_refusal() {
@@ -172,6 +176,12 @@ add_access
 printf '\n// app: ghost\nexport const GHOST_OBJECT_UNIVERSAL_IDENTIFIER = %s;\n' "'$CORE_OBJECT'" \
   >> "$WORK/apps/access/src/constants/module-identifiers.ts"
 expect_refusal "a module-identifiers section naming an app that does not exist"
+
+fresh_copy
+add_access
+printf '\n// app: access\nexport const SELF_UNIVERSAL_IDENTIFIER = %s;\n' "'$ACC_ROLE'" \
+  >> "$WORK/apps/access/src/constants/module-identifiers.ts"
+expect_refusal "a module-identifiers section naming access itself"
 
 fresh_copy
 add_access

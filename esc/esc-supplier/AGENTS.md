@@ -12,7 +12,8 @@ The rest of this repository is the eMobility fork of Twenty (root `CLAUDE.md`); 
 | What | Where |
 |---|---|
 | Stack: image, compose, SSO patches, upgrades | `esc/esc-supplier/` (`README.md`) |
-| Data model: objects, fields, relations, views, roles, front components | a Twenty App per module in `apps/<module>/` |
+| Data model: objects, fields, relations, views, front components, an app's own roles | a Twenty App per module in `apps/<module>/` |
+| Roles for people | `apps/access/` |
 | Logic and data feeds (Credit Tracker, BaseLinker, MGR, reminders, scores) | `twenty-ingest`, `src/supplier/<module>/` (its own `AGENTS.md`) |
 | The ESC or RC CRM | never from here |
 
@@ -36,20 +37,18 @@ the roles for the people of the workspace. Like core, it is not a module.
 
 ## Dependency direction (enforced by `check-apps.sh`)
 
-A workspace member holds exactly one role, and a role for people names objects and fields of
-several modules, so such a role cannot live in a module: it lives in `apps/access/`.
-
 - **core → nothing.** Core never references a module.
 - **module → core and Twenty's standard objects.** A module lists every core identifier it
   uses in `apps/<module>/src/constants/core-identifiers.ts`, copied from
   `apps/core/src/constants/universal-identifiers.ts`; the gate refuses one core no longer has.
 - **module → module: never.** When two modules need the same thing, that thing moves into
   core first, in its own PR.
-- **access → core and any module.** Access holds roles for people only — no objects, fields
-  or views. Every identifier it uses from another app it lists in
-  `apps/access/src/constants/module-identifiers.ts`, one `// app: <name>` section per source
-  app (core included); the gate refuses an entry the named app no longer declares.
-- **nothing → access.** Neither core nor a module references an identifier owned by access.
+- **access → core and any module; nothing → access.** A member holds exactly one role and a
+  role for people names objects of several modules, so it cannot live in a module. Access holds
+  roles only (and its default function role): no objects, fields or views. Every identifier it
+  uses from another app it lists in `apps/access/src/constants/module-identifiers.ts`, one
+  `// app: <name>` section per source app (core included); the gate refuses an entry the named
+  app no longer declares.
 - A relation from a module object to a core object is declared **entirely in the module**:
   the `MANY_TO_ONE` field on the module's object and the reverse `ONE_TO_MANY` field on the
   core object, both with `defineField` (Twenty docs `data/relations`, `data/extending-objects`).
@@ -71,9 +70,9 @@ A throw-away core app and module app were applied, related, and uninstalled (RM 
 
 Taking a module out of the workspace is one PR: uninstall it (export its data first if anyone
 needs it — an uninstall hook can), then delete `apps/<module>/` and
-`twenty-ingest/src/supplier/<module>/`, and — where the access app is present — take the
-module's section out of `apps/access/src/constants/module-identifiers.ts` and every use of the
-module's identifiers out of the access roles; the gate refuses the PR otherwise.
+`twenty-ingest/src/supplier/<module>/`, and take the module's section out of
+`apps/access/src/constants/module-identifiers.ts` and its identifiers out of the access roles:
+the gate refuses a leftover section, the access app's typecheck a leftover use in a role.
 
 ## Naming
 

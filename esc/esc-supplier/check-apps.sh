@@ -16,8 +16,9 @@
 #     its own and the core identifiers it lists in src/constants/core-identifiers.ts, each of
 #     which must still exist in core. A module never references another module;
 #   - access holds roles for people only: in access src (outside __tests__) only
-#     defineApplication(...) and defineRole(...) may be called and nameSingular/namePlural are
-#     refused (no objects, fields or views); it lists the identifiers it uses in
+#     defineApplication(...), defineApplicationRole(...) (the default function role every app
+#     carries) and defineRole(...) may be called and nameSingular/namePlural are refused (no
+#     objects, fields or views); it lists the identifiers it uses in
 #     src/constants/module-identifiers.ts under one '// app: <name>' section per app (core in
 #     '// app: core'); a section for a missing app, for access itself, or an entry the named app
 #     does not declare is refused (access never has a core-identifiers.ts);
@@ -148,8 +149,8 @@ for app in apps:
                 continue
             rel = file.relative_to(app)
             text = file.read_text()
-            for call in sorted({c for c in re.findall(r"define\w+\(", text) if c not in ("defineApplication(", "defineRole(")}):
-                errors.append(f"access: {rel} calls {call[:-1]}(...) but access only calls defineApplication and defineRole")
+            for call in sorted({c for c in re.findall(r"define\w+\(", text) if c not in ("defineApplication(", "defineApplicationRole(", "defineRole(")}):
+                errors.append(f"access: {rel} calls {call[:-1]}(...) but access only calls defineApplication, defineApplicationRole and defineRole")
             for name in sorted(set(re.findall(r"nameSingular|namePlural", text))):
                 errors.append(f"access: {rel} has {name}; access holds roles only (no objects, fields or views)")
 
