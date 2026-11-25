@@ -12,7 +12,8 @@ The rest of this repository is the eMobility fork of Twenty (root `CLAUDE.md`); 
 | What | Where |
 |---|---|
 | Stack: image, compose, SSO patches, upgrades | `esc/esc-supplier/` (`README.md`) |
-| Data model: objects, fields, relations, views, roles, front components | a Twenty App per module in `apps/<module>/` |
+| Data model: objects, fields, relations, views, front components, an app's own roles | a Twenty App per module in `apps/<module>/` |
+| Roles for people | `apps/access/` |
 | Logic and data feeds (Credit Tracker, BaseLinker, MGR, reminders, scores) | `twenty-ingest`, `src/supplier/<module>/` (its own `AGENTS.md`) |
 | The ESC or RC CRM | never from here |
 
@@ -31,7 +32,8 @@ A module is:
 - optionally `twenty-ingest/src/supplier/<module>/` — its logic, off by its own flag.
 
 `apps/core/` is the **core** app ("ESC Supplier Hub"): the supplier record and whatever every
-module needs. It is not a module and is never removed.
+module needs. It is not a module and is never removed. `apps/access/` is the **access** app:
+the roles for the people of the workspace. Like core, it is not a module.
 
 ## Dependency direction (enforced by `check-apps.sh`)
 
@@ -41,6 +43,12 @@ module needs. It is not a module and is never removed.
   `apps/core/src/constants/universal-identifiers.ts`; the gate refuses one core no longer has.
 - **module → module: never.** When two modules need the same thing, that thing moves into
   core first, in its own PR.
+- **access → core and any module; nothing → access.** A member holds exactly one role and a
+  role for people names objects of several modules, so it cannot live in a module. Access holds
+  roles only (and its default function role): no objects, fields or views. Every identifier it
+  uses from another app it lists in `apps/access/src/constants/module-identifiers.ts`, one
+  `// app: <name>` section per source app (core included); the gate refuses an entry the named
+  app no longer declares.
 - A relation from a module object to a core object is declared **entirely in the module**:
   the `MANY_TO_ONE` field on the module's object and the reverse `ONE_TO_MANY` field on the
   core object, both with `defineField` (Twenty docs `data/relations`, `data/extending-objects`).
@@ -60,8 +68,11 @@ A throw-away core app and module app were applied, related, and uninstalled (RM 
   Remove modules first.
 - Uninstalling keeps the app's registration; `deleteApplicationRegistration` removes it.
 
-Removing a module is one PR: uninstall it (export its data first if anyone needs it — an
-uninstall hook can), then delete `apps/<module>/` and `twenty-ingest/src/supplier/<module>/`.
+Taking a module out of the workspace is one PR: uninstall it (export its data first if anyone
+needs it — an uninstall hook can), then delete `apps/<module>/` and
+`twenty-ingest/src/supplier/<module>/`, and take the module's section out of
+`apps/access/src/constants/module-identifiers.ts` and its identifiers out of the access roles:
+the gate refuses a leftover section, the access app's typecheck a leftover use in a role.
 
 ## Naming
 
@@ -95,8 +106,9 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
 ## Tests and gate
 
 - `./verify.sh` runs `tests/check-apps.test.sh` (every refusal of the gate proven on a broken
-  copy) and `check-apps.sh` (pins, identifiers, dependency direction, object names). With an
-  app's `node_modules` present it also runs that app's typecheck, unit tests and build.
+  copy, the access rules included) and `check-apps.sh` (pins, identifiers, dependency direction,
+  object names). With an app's `node_modules` present it also runs that app's typecheck, unit
+  tests and build.
 - Unit tests per app with vitest in `src/__tests__/`. Logic is tested in twenty-ingest.
 
 ## Pull requests

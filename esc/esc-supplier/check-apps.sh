@@ -5,7 +5,8 @@
 # Usage: esc/esc-supplier/check-apps.sh [APPS_DIR]
 #
 # Always runs (no dependencies needed):
-#   - apps/core exists; every other directory under apps/ is a module;
+#   - apps/core exists (required) and apps/access is an optional third class above the modules
+#     (every other directory under apps/ is a module);
 #   - each app pins twenty, twenty-sdk, twenty-client-sdk and twenty-ui to ONE exact version,
 #     and every app pins the SAME version (one server, one SDK);
 #   - every identifier an app declares in src/constants/universal-identifiers.ts is a UUID v4
@@ -14,6 +15,14 @@
 #   - dependency direction: core references only its own identifiers; a module references only
 #     its own and the core identifiers it lists in src/constants/core-identifiers.ts, each of
 #     which must still exist in core. A module never references another module;
+#   - access holds roles for people only: in access src (outside __tests__) only
+#     defineApplication(...), defineApplicationRole(...) (the default function role every app
+#     carries) and defineRole(...) may be called and nameSingular/namePlural are refused (no
+#     objects, fields or views); it lists the identifiers it uses in
+#     src/constants/module-identifiers.ts under one '// app: <name>' section per app (core in
+#     '// app: core'); a section for a missing app, for access itself, or an entry the named app
+#     does not declare is refused (access never has a core-identifiers.ts);
+#   - nothing references access: core or a module referencing an identifier owned by access is refused;
 #   - object names (nameSingular / namePlural) are unique across all apps;
 #   - no app carries .github/workflows (Actions are off for the org).
 # Runs per app when that app's node_modules is present:
@@ -47,6 +56,41 @@ def source_uuids(app):
         for value in UUID.findall(file.read_text()):
             found.setdefault(value.lower(), file.relative_to(app))
     return found
+
+
+def module_identifiers(app, names, own):
+    # access's module-identifiers.ts: a '// app: <name>' line opens a section and each
+    # 'export const NAME = '<uuid>';'' after it belongs to that section. Returns
+    # (valid_values, errors); only entries in a section for a real, non-access app that the
+    # named app declares join valid_values.
+    path = app / "src/constants/module-identifiers.ts"
+    valid = set()
+    errors = []
+    if not path.exists():
+        return valid, errors
+    section = None
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        header = re.match(r"//\s*app:\s*(\S+)", line)
+        if header:
+            section = header.group(1)
+            if section == "access":
+                errors.append("access: module-identifiers.ts section '// app: access' names access itself")
+            elif section not in names:
+                errors.append(f"access: module-identifiers.ts section '// app: {section}' names an app that does not exist")
+            continue
+        const = CONSTANT.search(line)
+        if not const:
+            continue
+        name, value = const.groups()
+        if section is None:
+            errors.append(f"access: module-identifiers.ts constant {name} is before any '// app:' line")
+        elif section in names and section != "access":
+            if value not in own.get(section, set()):
+                errors.append(f"access: module-identifiers.ts constant {name} = {value} is not declared by {section}; take its section out of access in the same PR")
+            else:
+                valid.add(value)
+    return valid, errors
 
 
 apps = sorted(p for p in apps_dir.iterdir() if p.is_dir() and not p.name.startswith("."))
@@ -96,13 +140,31 @@ for app in apps:
     if (app / ".github" / "workflows").exists():
         errors.append(f"{app.name}: .github/workflows is present; Actions are off for the org")
 
+    if app.name == "access":
+        if (app / "src/constants/core-identifiers.ts").exists():
+            errors.append("access: src/constants/core-identifiers.ts is present; access lists the identifiers "
+                          "it uses in module-identifiers.ts (core in the '// app: core' section)")
+        for file in (app / "src").rglob("*.ts*"):
+            if "__tests__" in file.parts:
+                continue
+            rel = file.relative_to(app)
+            text = file.read_text()
+            for call in sorted({c for c in re.findall(r"define\w+\(", text) if c not in ("defineApplication(", "defineApplicationRole(", "defineRole(")}):
+                errors.append(f"access: {rel} calls {call[:-1]}(...) but access only calls defineApplication, defineApplicationRole and defineRole")
+            for name in sorted(set(re.findall(r"nameSingular|namePlural", text))):
+                errors.append(f"access: {rel} has {name}; access holds roles only (no objects, fields or views)")
+
 if len(set(versions.values())) > 1:
     errors.append(f"apps pin different twenty versions (one server): {versions}")
 
 core_ids = own.get("core", set())
 for app in apps:
     allowed = set(own[app.name])
-    if app.name != "core":
+    if app.name == "access":
+        access_refs, ref_errors = module_identifiers(app, names, own)
+        errors.extend(ref_errors)
+        allowed |= access_refs
+    elif app.name != "core":
         refs = declared(app / "src/constants/core-identifiers.ts")
         for value, name in refs.items():
             if value not in core_ids:
@@ -114,9 +176,16 @@ for app in apps:
         if value in allowed:
             continue
         if value in owner:
-            errors.append(f"{app.name}: {file} references {value} owned by {owner[value]}; "
-                          + ("core never references a module" if app.name == "core"
-                             else "list core identifiers in src/constants/core-identifiers.ts; never reference another module"))
+            other = owner[value]
+            if other == "access":
+                reason = "nothing references access"
+            elif app.name == "core":
+                reason = "core never references a module"
+            elif app.name == "access":
+                reason = "list it in module-identifiers.ts under the owning app's section"
+            else:
+                reason = "list core identifiers in src/constants/core-identifiers.ts; never reference another module"
+            errors.append(f"{app.name}: {file} references {value} owned by {other}; {reason}")
         else:
             errors.append(f"{app.name}: {file} has identifier {value} not declared in src/constants/")
 

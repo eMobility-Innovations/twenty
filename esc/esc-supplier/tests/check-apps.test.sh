@@ -37,6 +37,35 @@ EOF
     > "$mod/src/objects/fixture.object.ts"
 }
 
+ACC_APP="$(uuid)"; ACC_ROLE="$(uuid)"; ACC_DEFAULT_ROLE="$(uuid)"
+
+add_access() {
+  # The third class above the modules: roles for people only. Declares its own
+  # application and role; lists the identifiers it uses in module-identifiers.ts.
+  local acc="$WORK/apps/access"
+  mkdir -p "$acc/src/constants" "$acc/src/roles"
+  sed 's/"name": "[^"]*"/"name": "esc-supplier-access"/' "$HERE/apps/core/package.json" > "$acc/package.json"
+  cat > "$acc/src/constants/universal-identifiers.ts" <<EOF
+export const APPLICATION_UNIVERSAL_IDENTIFIER = '$ACC_APP';
+export const ROLE_UNIVERSAL_IDENTIFIER = '$ACC_ROLE';
+export const DEFAULT_ROLE_UNIVERSAL_IDENTIFIER = '$ACC_DEFAULT_ROLE';
+EOF
+  cat > "$acc/src/constants/module-identifiers.ts" <<EOF
+// app: core
+export const SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER = '$CORE_OBJECT';
+// app: fixture
+export const FIXTURE_OBJECT_UNIVERSAL_IDENTIFIER = '$MOD_OBJECT';
+export const SUPPLIER_ON_FIXTURE_FIELD_UNIVERSAL_IDENTIFIER = '$MOD_FIELD';
+EOF
+  printf "import { defineApplication } from 'twenty-sdk';\nimport { APPLICATION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';\nexport default defineApplication({ universalIdentifier: APPLICATION_UNIVERSAL_IDENTIFIER, displayName: 'ESC Supplier - Access' });\n" \
+    > "$acc/src/application.ts"
+  printf "import { defineRole } from 'twenty-sdk';\nimport { ROLE_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';\nimport { SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER, FIXTURE_OBJECT_UNIVERSAL_IDENTIFIER, SUPPLIER_ON_FIXTURE_FIELD_UNIVERSAL_IDENTIFIER } from 'src/constants/module-identifiers';\nexport default defineRole({ universalIdentifier: ROLE_UNIVERSAL_IDENTIFIER, displayName: 'ESC Supplier - Admin', objectAccesses: [{ object: { universalIdentifier: SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER } }, { object: { universalIdentifier: FIXTURE_OBJECT_UNIVERSAL_IDENTIFIER }, field: { universalIdentifier: SUPPLIER_ON_FIXTURE_FIELD_UNIVERSAL_IDENTIFIER } }] });\n" \
+    > "$acc/src/roles/admin.role.ts"
+  # The default function role every app carries (the build wires it into the manifest).
+  printf "import { defineApplicationRole } from 'twenty-sdk';\nimport { DEFAULT_ROLE_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';\nexport default defineApplicationRole({ universalIdentifier: DEFAULT_ROLE_UNIVERSAL_IDENTIFIER, label: 'default function role' });\n" \
+    > "$acc/src/default-role.ts"
+}
+
 expect_refusal() {
   local label="$1"
   if "$CHECK" "$WORK/apps" >/dev/null 2>&1; then
@@ -111,3 +140,70 @@ expect_refusal "no core app"
 fresh_copy
 mkdir -p "$WORK/apps/fixture/.github/workflows"
 expect_refusal "a .github/workflows directory"
+
+fresh_copy
+add_access
+"$CHECK" "$WORK/apps" >/dev/null 2>&1 || { echo "check-apps.test: core + a module + access were refused:" >&2; "$CHECK" "$WORK/apps" >&2 || true; exit 1; }
+echo "check-apps.test: core + a module + the access app accepted — good."
+
+fresh_copy
+add_access
+echo "export const X = defineObject({});" >> "$WORK/apps/access/src/roles/admin.role.ts"
+expect_refusal "access calling defineObject (roles only)"
+
+fresh_copy
+add_access
+echo "export const Y = defineField({});" >> "$WORK/apps/access/src/roles/admin.role.ts"
+expect_refusal "access calling defineField (roles only)"
+
+fresh_copy
+add_access
+echo "export const Z = defineView({});" >> "$WORK/apps/access/src/roles/admin.role.ts"
+expect_refusal "access calling defineView (roles only)"
+
+fresh_copy
+add_access
+echo "export const N = { nameSingular: 'accessRoleThing' };" >> "$WORK/apps/access/src/roles/admin.role.ts"
+expect_refusal "access carrying a nameSingular (no objects in access)"
+
+fresh_copy
+add_access
+sed -i "1i export const EARLY_SUPPLIER_UNIVERSAL_IDENTIFIER = '$CORE_OBJECT';" "$WORK/apps/access/src/constants/module-identifiers.ts"
+expect_refusal "a module-identifiers entry before any '// app:' line"
+
+fresh_copy
+add_access
+printf '\n// app: ghost\nexport const GHOST_OBJECT_UNIVERSAL_IDENTIFIER = %s;\n' "'$CORE_OBJECT'" \
+  >> "$WORK/apps/access/src/constants/module-identifiers.ts"
+expect_refusal "a module-identifiers section naming an app that does not exist"
+
+fresh_copy
+add_access
+printf '\n// app: access\nexport const SELF_UNIVERSAL_IDENTIFIER = %s;\n' "'$ACC_ROLE'" \
+  >> "$WORK/apps/access/src/constants/module-identifiers.ts"
+expect_refusal "a module-identifiers section naming access itself"
+
+fresh_copy
+add_access
+sed -i "s/= '$MOD_OBJECT';/= '$CORE_OBJECT';/" "$WORK/apps/access/src/constants/module-identifiers.ts"
+expect_refusal "a module-identifiers entry the named app no longer declares"
+
+fresh_copy
+add_access
+echo "export const STOLEN_APPLICATION_UNIVERSAL_IDENTIFIER = '$MOD_APP';" >> "$WORK/apps/access/src/roles/admin.role.ts"
+expect_refusal "access referencing a fixture identifier it does not list"
+
+fresh_copy
+add_access
+echo "export const X = '$ACC_APP';" >> "$WORK/apps/core/src/objects/supplier.object.ts"
+expect_refusal "core referencing an access identifier (nothing references access)"
+
+fresh_copy
+add_access
+echo "export const Y = '$ACC_ROLE';" >> "$WORK/apps/fixture/src/objects/fixture.object.ts"
+expect_refusal "a module referencing an access identifier (nothing references access)"
+
+fresh_copy
+add_access
+echo "export const SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER = '$CORE_OBJECT';" > "$WORK/apps/access/src/constants/core-identifiers.ts"
+expect_refusal "access with its own core-identifiers list"
