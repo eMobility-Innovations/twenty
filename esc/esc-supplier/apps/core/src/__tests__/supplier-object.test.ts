@@ -1,3 +1,4 @@
+import { FieldType } from 'twenty-sdk/define';
 import supplier, { SupplierLanguage, SupplierType } from 'src/objects/supplier.object';
 import { describe, expect, it } from 'vitest';
 
@@ -32,5 +33,14 @@ describe('supplier object', () => {
   it('should keep both archive fields optional', () => {
     expect(field('archivedAt')).toMatchObject({ isNullable: true, defaultValue: null });
     expect(field('archivedReason')).toMatchObject({ isNullable: true });
+  });
+
+  it('should keep the PIM supplier idx optional and searchable', () => {
+    expect(field('pimSupplierIdx')).toMatchObject({
+      type: FieldType.TEXT,
+      isNullable: true,
+      isSearchable: true,
+      label: 'PIM supplier idx',
+    });
   });
 });
