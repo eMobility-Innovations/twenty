@@ -1,0 +1,66 @@
+import { defineView, getFieldUniversalIdentifier } from 'twenty-sdk/define';
+
+import {
+  ALL_AGREEMENTS_AGREEMENT_TYPE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  ALL_AGREEMENTS_ARCHIVED_AT_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  ALL_AGREEMENTS_END_DATE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  ALL_AGREEMENTS_NAME_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  ALL_AGREEMENTS_START_DATE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  ALL_AGREEMENTS_SUPPLIER_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+  ALL_AGREEMENTS_VIEW_UNIVERSAL_IDENTIFIER,
+  APPLICATION_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_ARCHIVED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_END_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_OBJECT_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_START_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_SUPPLIER_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_TYPE_FIELD_UNIVERSAL_IDENTIFIER,
+} from 'src/constants/universal-identifiers';
+
+export default defineView({
+  universalIdentifier: ALL_AGREEMENTS_VIEW_UNIVERSAL_IDENTIFIER,
+  name: 'All agreements',
+  objectUniversalIdentifier: SUPPLIER_AGREEMENT_OBJECT_UNIVERSAL_IDENTIFIER,
+  fields: [
+    {
+      universalIdentifier: ALL_AGREEMENTS_NAME_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier: getFieldUniversalIdentifier({
+        applicationUniversalIdentifier: APPLICATION_UNIVERSAL_IDENTIFIER,
+        objectUniversalIdentifier: SUPPLIER_AGREEMENT_OBJECT_UNIVERSAL_IDENTIFIER,
+        name: 'name',
+      }),
+      position: 0,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: ALL_AGREEMENTS_SUPPLIER_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier: SUPPLIER_AGREEMENT_SUPPLIER_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 1,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: ALL_AGREEMENTS_AGREEMENT_TYPE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier: SUPPLIER_AGREEMENT_TYPE_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 2,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: ALL_AGREEMENTS_START_DATE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier: SUPPLIER_AGREEMENT_START_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 3,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: ALL_AGREEMENTS_END_DATE_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier: SUPPLIER_AGREEMENT_END_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 4,
+      isVisible: true,
+    },
+    {
+      universalIdentifier: ALL_AGREEMENTS_ARCHIVED_AT_VIEW_FIELD_UNIVERSAL_IDENTIFIER,
+      fieldMetadataUniversalIdentifier: SUPPLIER_AGREEMENT_ARCHIVED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+      position: 5,
+      isVisible: true,
+    },
+  ],
+});
