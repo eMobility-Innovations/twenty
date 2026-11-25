@@ -111,10 +111,10 @@ describe('agreements module relations', () => {
     expect(relation(supplierOnSupplierAgreement).config.universalSettings?.relationType).toBe(
       RelationType.MANY_TO_ONE,
     );
-    expect(supplierOnSupplierAgreement.config.relationTargetObjectMetadataUniversalIdentifier).toBe(
+    expect(relation(supplierOnSupplierAgreement).config.relationTargetObjectMetadataUniversalIdentifier).toBe(
       SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
     );
-    expect(supplierOnSupplierAgreement.config.relationTargetFieldMetadataUniversalIdentifier).toBe(
+    expect(relation(supplierOnSupplierAgreement).config.relationTargetFieldMetadataUniversalIdentifier).toBe(
       SUPPLIER_AGREEMENTS_RECORDS_FIELD_UNIVERSAL_IDENTIFIER,
     );
     expect(agreementsRecordsOnSupplier.config.name).toBe('agreementsRecords');
@@ -124,10 +124,10 @@ describe('agreements module relations', () => {
     expect(relation(agreementsRecordsOnSupplier).config.universalSettings?.relationType).toBe(
       RelationType.ONE_TO_MANY,
     );
-    expect(agreementsRecordsOnSupplier.config.relationTargetObjectMetadataUniversalIdentifier).toBe(
+    expect(relation(agreementsRecordsOnSupplier).config.relationTargetObjectMetadataUniversalIdentifier).toBe(
       SUPPLIER_AGREEMENT_OBJECT_UNIVERSAL_IDENTIFIER,
     );
-    expect(agreementsRecordsOnSupplier.config.relationTargetFieldMetadataUniversalIdentifier).toBe(
+    expect(relation(agreementsRecordsOnSupplier).config.relationTargetFieldMetadataUniversalIdentifier).toBe(
       SUPPLIER_AGREEMENT_SUPPLIER_FIELD_UNIVERSAL_IDENTIFIER,
     );
   });
@@ -158,7 +158,7 @@ describe('agreements module relations', () => {
     expect(
       relation(commitmentsOnSupplierAgreement).config.relationTargetObjectMetadataUniversalIdentifier,
     ).toBe(SUPPLIER_AGREEMENT_COMMITMENT_OBJECT_UNIVERSAL_IDENTIFIER);
-    expect(commitmentsOnSupplierAgreement.config.relationTargetFieldMetadataUniversalIdentifier).toBe(
+    expect(relation(commitmentsOnSupplierAgreement).config.relationTargetFieldMetadataUniversalIdentifier).toBe(
       SUPPLIER_AGREEMENT_COMMITMENT_AGREEMENT_FIELD_UNIVERSAL_IDENTIFIER,
     );
   });
