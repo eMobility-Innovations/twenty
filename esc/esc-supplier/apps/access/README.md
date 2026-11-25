@@ -17,6 +17,7 @@ API key for testing.
 |---|---|
 | Supplier basic data | edit: read, create, update (the `supplier` object) |
 | The four forms objects | edit: read, create, update |
+| Notes, tasks and files on a record | edit: read, create, update; files can be uploaded and downloaded |
 | The six `lifecycle*` fields | read only (status, the triage score and fit signal, triage date, negotiation notes, pending decision) |
 | The agreements and their commitments | read only (the two agreement objects) |
 
