@@ -9,31 +9,34 @@ import lifecycleTriageFitSignalOnSupplier from 'src/fields/lifecycle-triage-fit-
 import lifecycleTriageScoreOnSupplier from 'src/fields/lifecycle-triage-score-on-supplier.field';
 import { describe, expect, it } from 'vitest';
 
+// defineField returns a union over every field type. These tests read it through one loose shape.
 type FieldDefinition = {
-  errors: string[];
+  errors: readonly unknown[];
   config: {
     name: string;
-    type: FieldType;
+    type: string;
     label: string;
     objectUniversalIdentifier: string;
-    isNullable: boolean;
+    isNullable?: boolean;
     defaultValue?: unknown;
-    options?: { value: string; label: string }[];
+    options?: readonly { value: string; label: string }[] | null;
   };
 };
+const read = (field: unknown) => field as FieldDefinition;
+const status = read(lifecycleStatusOnSupplier);
 
 const fieldCases: [string, FieldType, string, FieldDefinition][] = [
-  ['lifecycleStatus', FieldType.SELECT, 'Status', lifecycleStatusOnSupplier],
-  ['lifecycleTriageScore', FieldType.NUMBER, 'Gap/overlap score', lifecycleTriageScoreOnSupplier],
-  ['lifecycleTriageFitSignal', FieldType.TEXT, 'Fit signal', lifecycleTriageFitSignalOnSupplier],
-  ['lifecycleTriageDate', FieldType.DATE, 'Triage date', lifecycleTriageDateOnSupplier],
+  ['lifecycleStatus', FieldType.SELECT, 'Status', read(lifecycleStatusOnSupplier)],
+  ['lifecycleTriageScore', FieldType.NUMBER, 'Gap/overlap score', read(lifecycleTriageScoreOnSupplier)],
+  ['lifecycleTriageFitSignal', FieldType.TEXT, 'Fit signal', read(lifecycleTriageFitSignalOnSupplier)],
+  ['lifecycleTriageDate', FieldType.DATE, 'Triage date', read(lifecycleTriageDateOnSupplier)],
   [
     'lifecycleNegotiationNotes',
     FieldType.RICH_TEXT,
     'Negotiation notes',
-    lifecycleNegotiationNotesOnSupplier,
+    read(lifecycleNegotiationNotesOnSupplier),
   ],
-  ['lifecyclePendingDecision', FieldType.TEXT, 'Pending decision', lifecyclePendingDecisionOnSupplier],
+  ['lifecyclePendingDecision', FieldType.TEXT, 'Pending decision', read(lifecyclePendingDecisionOnSupplier)],
 ];
 
 describe('lifecycle fields on the core supplier', () => {
@@ -51,14 +54,14 @@ describe('lifecycle fields on the core supplier', () => {
   );
 
   it('should offer exactly the four lifecycle statuses, in order', () => {
-    const optionValues = (lifecycleStatusOnSupplier.config.options ?? []).map(
+    const optionValues = (status.config.options ?? []).map(
       (option) => option.value,
     );
     expect(optionValues).toEqual(['PARKED', 'ONBOARDING', 'ACTIVE', 'UNDER_REVIEW']);
   });
 
   it('should not offer a Historical value', () => {
-    const words = (lifecycleStatusOnSupplier.config.options ?? []).flatMap((option) => [
+    const words = (status.config.options ?? []).flatMap((option) => [
       option.value,
       option.label,
     ]);
@@ -66,8 +69,7 @@ describe('lifecycle fields on the core supplier', () => {
   });
 
   it('should be empty until someone sets the status', () => {
-    const status = lifecycleStatusOnSupplier.config;
-    expect(status.isNullable).toBe(true);
-    expect(status.defaultValue).toBeUndefined();
+    expect(status.config.isNullable).toBe(true);
+    expect(status.config.defaultValue).toBeUndefined();
   });
 });

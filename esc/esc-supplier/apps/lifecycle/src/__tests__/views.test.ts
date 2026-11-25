@@ -18,20 +18,18 @@ import {
 } from 'src/constants/universal-identifiers';
 import { describe, expect, it } from 'vitest';
 
+// Only what these tests read. The SDK types both lists as optional and the operand as a wider union.
 type ViewDefinition = {
-  errors: string[];
   config: {
-    name: string;
-    objectUniversalIdentifier: string;
-    fields: { fieldMetadataUniversalIdentifier: string }[];
-    filters: { fieldMetadataUniversalIdentifier: string; operand: ViewFilterOperand }[];
+    fields?: readonly { fieldMetadataUniversalIdentifier: string }[];
+    filters?: readonly { fieldMetadataUniversalIdentifier: string; operand?: unknown }[];
   };
 };
 
 const columns = (view: ViewDefinition) =>
-  view.config.fields.map((field) => field.fieldMetadataUniversalIdentifier);
+  (view.config.fields ?? []).map((field) => field.fieldMetadataUniversalIdentifier);
 const filters = (view: ViewDefinition) =>
-  view.config.filters.map((filter) => [
+  (view.config.filters ?? []).map((filter) => [
     filter.fieldMetadataUniversalIdentifier,
     filter.operand,
   ]);
