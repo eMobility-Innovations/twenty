@@ -1,0 +1,127 @@
+import { defineObject, FieldType } from 'twenty-sdk/define';
+
+import {
+  SUPPLIER_AGREEMENT_COMMITMENT_AMOUNT_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_COMMITMENT_ARCHIVED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_COMMITMENT_COMPLETED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_COMMITMENT_DETAILS_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_COMMITMENT_DUE_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_COMMITMENT_KIND_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_COMMITMENT_OBJECT_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_COMMITMENT_START_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_AGREEMENT_COMMITMENT_TARGET_UNITS_FIELD_UNIVERSAL_IDENTIFIER,
+} from 'src/constants/universal-identifiers';
+
+// What kind of commitment this is; a milestone is a commitment with a date.
+export enum SupplierAgreementCommitmentKind {
+  UNIT_TARGET = 'UNIT_TARGET',
+  DELIVERY_DEADLINE = 'DELIVERY_DEADLINE',
+  PRICE_POINT = 'PRICE_POINT',
+  EXCLUSIVITY = 'EXCLUSIVITY',
+  MILESTONE = 'MILESTONE',
+  OTHER = 'OTHER',
+}
+
+// One thing an agreement commits us or the supplier to; a milestone is a commitment with a date.
+export default defineObject({
+  universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_OBJECT_UNIVERSAL_IDENTIFIER,
+  nameSingular: 'supplierAgreementCommitment',
+  namePlural: 'supplierAgreementCommitments',
+  labelSingular: 'Commitment',
+  labelPlural: 'Commitments',
+  description: 'One thing an agreement commits us or the supplier to; a milestone is a commitment with a date',
+  icon: 'IconTargetArrow',
+  fields: [
+    {
+      universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_KIND_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'kind',
+      type: FieldType.SELECT,
+      label: 'Kind',
+      description: 'Unit target, delivery deadline, price point, exclusivity, milestone or other',
+      icon: 'IconCategory',
+      isNullable: false,
+      defaultValue: `'${SupplierAgreementCommitmentKind.OTHER}'`,
+      options: [
+        { value: SupplierAgreementCommitmentKind.UNIT_TARGET, label: 'Unit target', position: 0, color: 'blue' },
+        {
+          value: SupplierAgreementCommitmentKind.DELIVERY_DEADLINE,
+          label: 'Delivery deadline',
+          position: 1,
+          color: 'orange',
+        },
+        { value: SupplierAgreementCommitmentKind.PRICE_POINT, label: 'Price point', position: 2, color: 'green' },
+        { value: SupplierAgreementCommitmentKind.EXCLUSIVITY, label: 'Exclusivity', position: 3, color: 'purple' },
+        { value: SupplierAgreementCommitmentKind.MILESTONE, label: 'Milestone', position: 4, color: 'yellow' },
+        { value: SupplierAgreementCommitmentKind.OTHER, label: 'Other', position: 5, color: 'gray' },
+      ],
+    },
+    {
+      universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_START_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'startDate',
+      type: FieldType.DATE,
+      label: 'Start date',
+      description: 'Where a unit target starts counting',
+      icon: 'IconCalendar',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_DUE_DATE_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'dueDate',
+      type: FieldType.DATE,
+      label: 'Due date',
+      description: 'When this commitment is due; a milestone is a commitment with a date',
+      icon: 'IconCalendar',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_TARGET_UNITS_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'targetUnits',
+      type: FieldType.NUMBER,
+      label: 'Target units',
+      description: 'The number of units this commitment covers',
+      icon: 'IconBox',
+      universalSettings: { dataType: 'int' },
+      isNullable: true,
+      defaultValue: null,
+    },
+    {
+      universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_AMOUNT_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'amount',
+      type: FieldType.CURRENCY,
+      label: 'Amount',
+      description: 'The money this commitment covers',
+      icon: 'IconCoins',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_DETAILS_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'details',
+      type: FieldType.TEXT,
+      label: 'Details',
+      description: 'Free text on this commitment',
+      icon: 'IconNote',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_COMPLETED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'completedAt',
+      type: FieldType.DATE_TIME,
+      label: 'Completed at',
+      description: 'When this commitment was completed',
+      icon: 'IconCircleCheck',
+      isNullable: true,
+      defaultValue: null,
+    },
+    {
+      universalIdentifier: SUPPLIER_AGREEMENT_COMMITMENT_ARCHIVED_AT_FIELD_UNIVERSAL_IDENTIFIER,
+      name: 'archivedAt',
+      type: FieldType.DATE_TIME,
+      label: 'Archived at',
+      description:
+        'When this commitment went out of use; empty while it is live. A commitment is archived, never deleted.',
+      icon: 'IconArchive',
+      isNullable: true,
+      defaultValue: null,
+    },
+  ],
+});
