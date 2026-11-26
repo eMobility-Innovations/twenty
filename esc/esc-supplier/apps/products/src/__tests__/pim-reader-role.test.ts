@@ -12,6 +12,7 @@ type RoleObjectEntry = {
   canDestroyAllRecords: boolean;
 };
 type RoleRecord = {
+  label: string;
   canUpdateAllSettings: boolean;
   canBeAssignedToUsers: boolean;
   canBeAssignedToApiKeys: boolean;
@@ -29,7 +30,10 @@ type RoleRecord = {
 const role = (pimReaderRoleDefinition as unknown as { config: RoleRecord }).config;
 const objects = role.recordsPermissions.objects ?? [];
 
-describe('pim reader role', () => {
+describe('pim sync role', () => {
+  it('should carry the pim sync label', () => {
+    expect(role.label).toBe('ESC Supplier — PIM sync');
+  });
   it('should be assignable to API keys only', () => {
     expect(role.canBeAssignedToApiKeys).toBe(true);
     expect(role.canBeAssignedToUsers).toBe(false);
@@ -47,18 +51,31 @@ describe('pim reader role', () => {
     });
   });
 
-  it('should read exactly the supplier and supplier product objects, and write nothing', () => {
+  it('should name exactly the supplier and supplier product objects', () => {
     expect(objects.map((entry) => entry.objectUniversalIdentifier).sort()).toEqual(
       [SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER, SUPPLIER_PRODUCT_OBJECT_UNIVERSAL_IDENTIFIER].sort(),
     );
-    for (const entry of objects) {
-      expect(entry).toMatchObject({
-        canReadAllRecords: true,
-        canCreateAllRecords: false,
-        canUpdateAllRecords: false,
-        canSoftDeleteAllRecords: false,
-        canDestroyAllRecords: false,
-      });
-    }
+  });
+
+  it('should grant read only on the supplier object', () => {
+    expect(objects.find((entry) => entry.objectUniversalIdentifier === SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER)).toEqual({
+      objectUniversalIdentifier: SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
+      canReadAllRecords: true,
+      canCreateAllRecords: false,
+      canUpdateAllRecords: false,
+      canSoftDeleteAllRecords: false,
+      canDestroyAllRecords: false,
+    });
+  });
+
+  it('should grant read and update only on the supplier product object', () => {
+    expect(objects.find((entry) => entry.objectUniversalIdentifier === SUPPLIER_PRODUCT_OBJECT_UNIVERSAL_IDENTIFIER)).toEqual({
+      objectUniversalIdentifier: SUPPLIER_PRODUCT_OBJECT_UNIVERSAL_IDENTIFIER,
+      canReadAllRecords: true,
+      canCreateAllRecords: false,
+      canUpdateAllRecords: true,
+      canSoftDeleteAllRecords: false,
+      canDestroyAllRecords: false,
+    });
   });
 });
