@@ -137,6 +137,7 @@ export default defineObject({
       icon: 'IconLink',
       isNullable: true,
       isSearchable: true,
+      isUnique: true,
     },
   ],
 });

@@ -41,6 +41,14 @@ describe('supplier object', () => {
       isNullable: true,
       isSearchable: true,
       label: 'PIM supplier idx',
+      isUnique: true,
     });
+  });
+
+  it('should keep the PIM supplier idx the only unique supplier field', () => {
+    const uniqueFieldNames = (supplier.config.fields ?? [])
+      .filter((f) => f.isUnique)
+      .map((f) => f.name);
+    expect(uniqueFieldNames).toEqual(['pimSupplierIdx']);
   });
 });
