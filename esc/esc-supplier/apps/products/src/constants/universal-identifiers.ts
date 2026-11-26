@@ -7,6 +7,10 @@ export const APP_DESCRIPTION =
 export const APPLICATION_UNIVERSAL_IDENTIFIER = '360bf43f-20f9-4222-a6f2-651901c77b0c';
 export const DEFAULT_ROLE_UNIVERSAL_IDENTIFIER = 'cd59e6a0-2d65-44f9-adb1-9c2799bcc9b4';
 
+// Navigation: the one menu item, opening the in-use products view (RM #28117)
+export const SUPPLIER_PRODUCTS_NAVIGATION_MENU_ITEM_UNIVERSAL_IDENTIFIER =
+  '86f14a90-5d3d-4c42-bdd6-2f74ca2f1d46';
+
 // supplierProduct: what one supplier offers under one of our SKUs (RM #28117)
 export const SUPPLIER_PRODUCT_OBJECT_UNIVERSAL_IDENTIFIER = '04a259f1-9896-4dad-9374-95547ed735a2';
 export const SUPPLIER_PRODUCT_SUPPLIER_CODE_FIELD_UNIVERSAL_IDENTIFIER =
