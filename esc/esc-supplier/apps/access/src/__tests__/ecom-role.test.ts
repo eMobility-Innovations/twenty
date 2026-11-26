@@ -13,6 +13,7 @@ import {
   SUPPLIER_LIFECYCLE_TRIAGE_FIT_SIGNAL_FIELD_UNIVERSAL_IDENTIFIER,
   SUPPLIER_LIFECYCLE_TRIAGE_SCORE_FIELD_UNIVERSAL_IDENTIFIER,
   SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_PRODUCT_OBJECT_UNIVERSAL_IDENTIFIER,
 } from 'src/constants/module-identifiers';
 import defaultRoleDefinition from 'src/default-role';
 import ecomRoleDefinition from 'src/roles/ecom.role';
@@ -147,17 +148,25 @@ describe('ecom role', () => {
     }
   });
 
+  it('should grant read, create and update on the supplier product object', () => {
+    const object = byIdentifier(ecom, SUPPLIER_PRODUCT_OBJECT_UNIVERSAL_IDENTIFIER);
+    expect(object).toBeDefined();
+    expect(object!.canReadAllRecords).toBe(true);
+    expect(object!.canCreateAllRecords).toBe(true);
+    expect(object!.canUpdateAllRecords).toBe(true);
+  });
+
   it('should grant exactly the upload and download file permission flags', () => {
     expect((ecom.config.permissionFlagUniversalIdentifiers ?? []).slice().sort()).toEqual(
       [SystemPermissionFlag.UPLOAD_FILE, SystemPermissionFlag.DOWNLOAD_FILE].sort(),
     );
   });
 
-  it('should list exactly twelve objects, each once', () => {
+  it('should list exactly thirteen objects, each once', () => {
     const objects = ecom.config.recordsPermissions.objects ?? [];
-    expect(objects).toHaveLength(12);
+    expect(objects).toHaveLength(13);
     const identifiers = objects.map((object) => object.objectUniversalIdentifier);
-    expect(new Set(identifiers).size).toBe(12);
+    expect(new Set(identifiers).size).toBe(13);
   });
 });
 
