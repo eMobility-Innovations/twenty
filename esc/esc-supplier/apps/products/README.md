@@ -71,6 +71,42 @@ The CSV has these columns (the headers the import dialog shows and matches on): 
 
 A row out of use gets `archivedAt` and stays. The view **Archived supplier products** lists these rows.
 
+## Volkanos notifications
+
+The `notify-volkanos-supplier-product` logic function sends `supplierProduct` database changes in batches of
+up to 200 events. Each `POST /api/integrator/v1/supplier-crm/changes/` uses the `X-API-KEY` header and sends
+an `events` array with only `object`, `id`, `action` and `occurredAt` per event. The timestamp is in UTC and
+uses the event time when available, or the function's current time otherwise. Volkanos re-reads the record
+from Twenty.
+
+| Twenty event | Volkanos action |
+|---|---|
+| `supplierProduct.created` | `created` |
+| `supplierProduct.updated`, `archivedAt` changes from empty to set | `archived` |
+| `supplierProduct.updated`, `archivedAt` changes from set to empty | `restored` |
+| Any other `supplierProduct.updated` | `updated` |
+| `supplierProduct.deleted` (Twenty soft delete) | `archived` |
+| `supplierProduct.restored` (Twenty soft-delete reversal) | `restored` |
+| `supplierProduct.destroyed` (hard delete) | `deleted` |
+
+Twenty's upserts reach the function through the matching created or updated event. [Twenty 2.60.0 upsert dispatch][upsert-dispatch]
+
+In the Twenty workspace, open **Settings → Apps → ESC Supplier — Products → Variables**. Enter the
+following workspace application variables and click **Save settings**. [Twenty application variables][app-variables]
+
+- `VOLKANOS_BASE_URL` is the HTTPS origin of the Volkanos instance.
+- `VOLKANOS_API_KEY` is the Volkanos application key, stored as a secret.
+
+If either value is missing or the URL is invalid, the function warns with the affected record IDs and skips
+delivery. On an HTTP or network failure, it logs the affected IDs and HTTP status when available, then throws
+`RetryableLogicFunctionError`. Twenty 2.60.0 retries this error up to three times after the initial attempt.
+[Twenty 2.60.0 job runner][retry-runner], [database event queue configuration][retry-queue]
+
+[upsert-dispatch]: https://github.com/twentyhq/twenty/blob/b238f4ca3058f7e4c1caaf072a06486c77982c0f/packages/twenty-server/src/engine/api/graphql/workspace-query-runner/listeners/entity-events-to-db.listener.ts#L81-L93
+[app-variables]: https://docs.twenty.com/developers/extend/apps/config/application.md
+[retry-runner]: https://github.com/twentyhq/twenty/blob/b238f4ca3058f7e4c1caaf072a06486c77982c0f/packages/twenty-server/src/engine/core-modules/logic-function/logic-function-trigger/logic-function-job-runner.service.ts#L51-L79
+[retry-queue]: https://github.com/twentyhq/twenty/blob/b238f4ca3058f7e4c1caaf072a06486c77982c0f/packages/twenty-server/src/engine/core-modules/logic-function/logic-function-trigger/triggers/database-event/call-database-event-trigger-jobs.job.ts#L160-L176
+
 ## Taking the module out of the workspace
 
 The steps are in the module contract, [`../../AGENTS.md`](../../AGENTS.md). The object and its rows leave with
