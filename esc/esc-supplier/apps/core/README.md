@@ -27,11 +27,12 @@ Build rules for the supplier CRM: [`../../AGENTS.md`](../../AGENTS.md).
 
 | Object | What | File |
 |---|---|---|
-| `supplier` | A supplier, forwarder or courier: company name (`name`), `supplierType`, `language` (en / zh), `reference` (our own id, e.g. SUP-014), `contactName`, `emails`, `whatsapp`, `creditTrackerId` (the Credit Tracker's supplier id, empty for one that is not there), `archivedAt` (when it went out of use, empty while in use), `archivedReason` (why it was archived and by what), `pimSupplierIdx` (the supplier's idx in the PIM Atlas, empty for one that is not there) | `src/objects/supplier.object.ts` |
+| `supplier` | A supplier, forwarder or courier: company name (`name`), `supplierType`, `language` (en / zh), `reference` (our own id, e.g. SUP-014), `contactName`, `emails`, `whatsapp`, `creditTrackerId` (the Credit Tracker's supplier id, empty for one that is not there), `archivedAt` (when it went out of use, empty while in use), `archivedReason` (why it was archived and by what), `pimSupplierIdx` (the supplier's idx in the PIM Atlas, empty for one that is not there; unique across suppliers and the key a CSV import matches a supplier by) | `src/objects/supplier.object.ts` |
 
 Modules hang their own records on `supplier` (a relation declared entirely in the module). Core
-holds no logic and no unique index: an import or sync finds its record by `reference` or
-`creditTrackerId` in twenty-ingest.
+holds no logic and one unique field, `pimSupplierIdx`: an import or sync finds its record by
+`reference` or `creditTrackerId` in twenty-ingest, and a CSV import matches a supplier by
+`pimSupplierIdx`.
 
 ## Versions
 
