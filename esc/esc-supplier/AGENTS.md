@@ -124,8 +124,9 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
   only after its PR is merged, and **only Karol applies it** and deploys twenty-ingest (from CT175,
   `apps/core/README.md` → "Applying"). Andrew prepares everything around it: he runs
   `twenty app plan` and puts its summary in the PR body, changes settings and data in the CRM
-  itself (he is Admin), and runs the forms commands (publish, campaign, import) from CT175 with
-  his own key, never a shared one. Karol may run those commands too.
+  itself (he is Admin), and runs the forms commands (publish, campaign, import) from his own
+  machine with his own key, never a shared one; he has no CT175 access and needs none, the
+  commands only call the CRM API (Karol, 2026-11-26). Karol may run those commands too.
 - Until V1 there is no test instance: apply to esc-supplier itself. The forms module is live
   there and holds supplier answers from its first real campaign on, so a plan with a destroy is
   applied only when the PR names the object or field and why. A test instance is requested at V1.
