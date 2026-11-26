@@ -20,6 +20,7 @@ API key for testing.
 | Notes, tasks and files on a record | edit: read, create, update; files can be uploaded and downloaded |
 | The six `lifecycle*` fields | read only (status, the triage score and fit signal, triage date, negotiation notes, pending decision) |
 | The agreements and their commitments | read only (the two agreement objects) |
+| Supplier products (the price list, module `products`) | edit: read, create, update |
 
 The role holds no grant beyond read, create and update on any object. It never soft-deletes or
 destroys a record, so a record that goes out of use is archived through its archive field, not

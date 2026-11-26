@@ -14,6 +14,7 @@ import {
   SUPPLIER_LIFECYCLE_TRIAGE_FIT_SIGNAL_FIELD_UNIVERSAL_IDENTIFIER,
   SUPPLIER_LIFECYCLE_TRIAGE_SCORE_FIELD_UNIVERSAL_IDENTIFIER,
   SUPPLIER_OBJECT_UNIVERSAL_IDENTIFIER,
+  SUPPLIER_PRODUCT_OBJECT_UNIVERSAL_IDENTIFIER,
 } from 'src/constants/module-identifiers';
 import { ECOM_ROLE_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
 
@@ -21,7 +22,8 @@ const NEVER_DELETES = { canSoftDeleteAllRecords: false, canDestroyAllRecords: fa
 
 // Ecom edits the supplier's basic data and the forms records; the status, the triage result and
 // the agreements are read-only for it; it never deletes a record. Ecom also writes notes and
-// tasks on a record and adds files to it (Karol, 25 Nov 2026). canBeAssignedToApiKeys is true
+// tasks on a record and adds files to it (Karol, 25 Nov 2026). Ecom keeps the supplier price list:
+// it reads, adds and edits supplier products (Karol, 26 Nov 2026, RM #28117). canBeAssignedToApiKeys is true
 // so the role can be tested with an API key.
 export default defineRole({
   universalIdentifier: ECOM_ROLE_UNIVERSAL_IDENTIFIER,
@@ -138,6 +140,13 @@ export default defineRole({
         canReadAllRecords: true,
         canCreateAllRecords: false,
         canUpdateAllRecords: false,
+        ...NEVER_DELETES,
+      },
+      {
+        objectUniversalIdentifier: SUPPLIER_PRODUCT_OBJECT_UNIVERSAL_IDENTIFIER,
+        canReadAllRecords: true,
+        canCreateAllRecords: true,
+        canUpdateAllRecords: true,
         ...NEVER_DELETES,
       },
     ],
