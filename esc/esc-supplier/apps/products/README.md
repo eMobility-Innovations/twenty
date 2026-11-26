@@ -49,18 +49,23 @@ There is no second row for the same supplier and code.
 
 ## CSV import
 
-The CSV has these columns: name, supplier code, SKU, `Amount (cost)`, `Currency (cost)`, cost valid from,
-product key, `Supplier / PIM supplier idx`, notes.
+The CSV has these columns (the headers the import dialog shows and matches on): `Name`, `Supplier code`,
+`SKU`, `Cost / Amount`, `Cost / Currency`, `Cost valid from`, `Product key`, `Supplier / PIM supplier idx`,
+`Notes`. A header that is spelt differently can still be matched by hand in the dialog.
 
-- `productKey` is the text `<the supplier's pimSupplierIdx>:<supplierCode>`, for example `12:ABC-123`.
+- `productKey` is the text `<the supplier's pimSupplierIdx>:<supplierCode>`, for example `pure-electric:ABC-123`
+  (the idx is the supplier's slug in the PIM Atlas).
 - Twenty's CSV import finds an existing row by a unique field and overwrites it. A re-import with the same
   `productKey` changes the price instead of adding a second row.
-- A currency field has two columns: `Amount (cost)` takes the amount in normal units (12.50, not micros), and
-  `Currency (cost)` takes the code (GBP, EUR, USD, CNY).
-- The `Supplier / PIM supplier idx` column matches the row to the core supplier by `pimSupplierIdx`. That core
-  field is not unique yet; a separate change to the core app marks it unique. Only after that can the import
-  match the supplier by this column.
+- A currency field has two columns: `Cost / Amount` takes the amount in normal units (12.50, not micros), and
+  `Cost / Currency` takes the code (GBP, EUR, USD, CNY).
+- The `Supplier / PIM supplier idx` column matches the row to the core supplier by `pimSupplierIdx`, which core
+  keeps unique (since 26 Nov 2026). A supplier whose `pimSupplierIdx` is empty cannot be matched by an import
+  until somebody fills it; its products can still be added by hand.
 - When the supplier has no code of its own, our SKU is written in `supplierCode`.
+- A row may be saved without a `productKey`: an empty key is stored as NULL, and any number of rows can be
+  without one (checked on esc-supplier, 26 Nov 2026). Such a row is not overwritten by an import; the view
+  "Products without a key" lists them.
 
 ## Archive, never remove
 
