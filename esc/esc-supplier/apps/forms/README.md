@@ -9,7 +9,7 @@ Redmine: #27891 (umbrella #27542).
 
 | Object | What |
 |---|---|
-| `supplierForm` | One **version** of one form: `formKey`, `version`, `status` (draft / published / retired) and `definition` (sections, fields, labels per language, validators by name, reference data). A published version is never edited; a change is a new record with `version` + 1. |
+| `supplierForm` | One **version** of one form: `formKey`, `version`, `status` (draft / published / retired) and `definition` (sections, fields, labels per language, validators by name, reference data). A published version is never edited; a change is a new record with `version` + 1. One exception (Karol, 2026-11-26): the forwarder's address and phone number are typed into the published record by hand before its campaign opens, never after. |
 | `supplierFormCampaign` | One send of one form version: `form`, `status` (draft / open / closed), `deadline` (personal links stop working then), `parameters` (values this send gives the form, e.g. the allowed date range). |
 | `supplierFormRecipient` | One supplier in one campaign: `campaign`, `supplier` (the core record), `language`, `personalLink` (the personal no-login address, readable on purpose so staff can send it by hand), `tokenHash`, `status` (not opened / opened / answered), `firstOpenedAt`, `lastOpenedAt`, `answeredAt`. |
 | `supplierFormAnswer` | One submission: `recipient`, `form` (the exact version answered), `submittedAt`, `answers` (as accepted), `summary` (readable text). **Append-only**: a correction is a new record. |

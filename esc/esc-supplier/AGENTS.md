@@ -120,12 +120,12 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
   before they merge.
 - PR body: Redmine id, the `twenty app plan` summary (adds / changes / destroys), how it was
   checked on esc-supplier.
-- **Who applies (Karol, 2026-11-24):** an app reaches the workspace only after its PR is merged,
-  never from an unmerged branch. The author applies it, from CT175, with their own API key
-  (`apps/core/README.md` → "Applying"), never a shared one. Andrew holds the Admin role in the
-  workspace for this (Karol changed it from Member the same day): he runs `twenty app plan`
-  himself and puts its summary in the PR body, and his apply waits for Karol's review and the
-  merge.
+- **Who applies (Karol, 2026-11-26; replaces the rule of 24 Nov):** an app reaches the workspace
+  only after its PR is merged, and **only Karol applies it** and deploys twenty-ingest (from CT175,
+  `apps/core/README.md` → "Applying"). Andrew prepares everything around it: he runs
+  `twenty app plan` and puts its summary in the PR body, changes settings and data in the CRM
+  itself (he is Admin), and runs the forms commands (publish, campaign, import) from CT175 with
+  his own key, never a shared one. Karol may run those commands too.
 - Until V1 there is no test instance: apply to esc-supplier itself. The forms module is live
   there and holds supplier answers from its first real campaign on, so a plan with a destroy is
   applied only when the PR names the object or field and why. A test instance is requested at V1.
@@ -139,8 +139,8 @@ the object's data. Every identifier is a UUID v4 in `src/constants/`, unique acr
 
 ## Archive, never delete (Karol, 2026-11-24)
 
-- Archive any record that goes out of use. Never delete it, so its history stays readable.
-  Twenty's record timeline shows who changed what and when.
+- Archive any real record that goes out of use. Never delete it, so its history stays readable
+  (the record timeline shows who changed what and when). Test records are deleted (Karol, 2026-11-26).
 - Core `supplier` carries `archivedAt` and `archivedReason`. `archivedAt` is the one fact for
   whether a supplier is out of use. A module with its own status (such as `Historical`) builds
   on that fact and never keeps a second flag.
